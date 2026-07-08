@@ -213,7 +213,7 @@ Future<void> _warmUp(ImageProvider provider) async {
 
   late final ImageStreamListener listener;
   listener = ImageStreamListener(
-    (ImageInfo _, bool _) {
+    (ImageInfo image, bool synchronousCall) {
       if (!completer.isCompleted) completer.complete();
       stream.removeListener(listener);
     },
@@ -242,4 +242,5 @@ Future<void> _warmUpGifAllFrames(
     await codec.getNextFrame();
   }
 }
+
 
