@@ -1,4 +1,4 @@
-// lib/core/router/app_router.dart
+﻿// lib/core/router/app_router.dart
 import 'package:flutter/widgets.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
@@ -23,7 +23,7 @@ final rootNavigatorKey = GlobalKey<NavigatorState>();
 class RouterNotifier extends ChangeNotifier {
   final Ref ref;
   RouterNotifier(this.ref) {
-    ref.listen<bool>(isAuthenticatedProvider, (_, _) => notifyListeners());
+    ref.listen<bool>(isAuthenticatedProvider, (previous, next) => notifyListeners());
   }
 
   bool get isLoggedIn => ref.read(isAuthenticatedProvider);
@@ -40,17 +40,17 @@ final routerProvider = Provider<GoRouter>((ref) {
       GoRoute(
         name: AppRoute.gate.name,
         path: AppRoute.gate.path,
-        builder: (_, _) => const GateScreen(),
+        builder: (context, state) => const GateScreen(),
       ),
       GoRoute(
         name: AppRoute.login.name,
         path: AppRoute.login.path,
-        builder: (_, _) => const LoginScreen(),
+        builder: (context, state) => const LoginScreen(),
       ),
       GoRoute(
         name: AppRoute.register.name,
         path: AppRoute.register.path,
-        builder: (_, _) => const RegisterScreen(),
+        builder: (context, state) => const RegisterScreen(),
       ),
       GoRoute(
         name: AppRoute.verify.name,
@@ -70,22 +70,22 @@ final routerProvider = Provider<GoRouter>((ref) {
       GoRoute(
         name: AppRoute.vpn.name,
         path: AppRoute.vpn.path,
-        builder: (_, _) => const VpnScreen(),
+        builder: (context, state) => const VpnScreen(),
       ),
       GoRoute(
         name: AppRoute.devices.name,
         path: AppRoute.devices.path,
-        builder: (_, _) => const DevicesScreen(),
+        builder: (context, state) => const DevicesScreen(),
       ),
       GoRoute(
         name: AppRoute.subscription.name,
         path: AppRoute.subscription.path,
-        builder: (_, _) => const SubscriptionScreen(),
+        builder: (context, state) => const SubscriptionScreen(),
       ),
       GoRoute(
         name: AppRoute.about.name,
         path: AppRoute.about.path,
-        builder: (_, _) => const AboutScreen(),
+        builder: (context, state) => const AboutScreen(),
       ),
       GoRoute(
         name: AppRoute.payment.name,
@@ -121,3 +121,4 @@ final routerProvider = Provider<GoRouter>((ref) {
     },
   );
 }, name: 'appRouter');
+

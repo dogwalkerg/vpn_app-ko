@@ -1,4 +1,4 @@
-// lib/core/errors/error_mapper.dart
+﻿// lib/core/errors/error_mapper.dart
 import 'package:dio/dio.dart';
 import 'exceptions.dart';
 
@@ -42,7 +42,10 @@ ApiException mapDioError(DioException e) {
         e.response?.statusCode,
       );
     case DioExceptionType.unknown:
-    return ApiException(e.message ?? 'Неизвестная ошибка', e.response?.statusCode);
+      return ApiException(e.message ?? 'Неизвестная ошибка', e.response?.statusCode);
+    case DioExceptionType.transformTimeout:
+      return const ApiException('Тайм-аут обработки запроса.');
   }
 }
+
 

@@ -1,4 +1,4 @@
-// lib/core/bootstrap/app_bootstrap.dart
+﻿// lib/core/bootstrap/app_bootstrap.dart
 import 'dart:async';
 import 'dart:io' show Platform;
 import 'dart:typed_data' show ByteData, Uint8List;
@@ -217,7 +217,7 @@ Future<void> _warmUp(ImageProvider provider) async {
       if (!completer.isCompleted) completer.complete();
       stream.removeListener(listener);
     },
-    onError: (Object _, StackTrace? _) {
+    onError: (Object error, StackTrace? stack) {
       if (!completer.isCompleted) completer.complete();
       stream.removeListener(listener);
     },
@@ -242,3 +242,4 @@ Future<void> _warmUpGifAllFrames(
     await codec.getNextFrame();
   }
 }
+

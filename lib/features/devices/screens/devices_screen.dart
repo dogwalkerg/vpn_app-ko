@@ -1,4 +1,4 @@
-// lib/features/devices/screens/devices_screen.dart
+﻿// lib/features/devices/screens/devices_screen.dart
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:vpn_app/core/cache/swr/swr_keys.dart';
@@ -76,7 +76,7 @@ class _DevicesScreenState extends ConsumerState<DevicesScreen> {
                           ? Center(child: Text('Нет устройств', style: t.typography.body.copyWith(color: c.textMuted)))
                           : ListView.separated(
                               itemCount: devices.length,
-                              separatorBuilder: (_, _) => Divider(color: c.borderMuted),
+                              separatorBuilder: (context, index) => Divider(color: c.borderMuted),
                               itemBuilder: (context, i) {
                                 final d = devices[i];
                                 final isCurrent = d.token == currentToken;
@@ -112,4 +112,5 @@ class _DevicesScreenState extends ConsumerState<DevicesScreen> {
     );
   }
 }
+
 

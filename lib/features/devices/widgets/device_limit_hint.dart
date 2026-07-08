@@ -1,4 +1,4 @@
-// lib/features/devices/widgets/device_limit_hint.dart
+﻿// lib/features/devices/widgets/device_limit_hint.dart
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:vpn_app/core/extensions/context_ext.dart';
@@ -24,7 +24,7 @@ class DeviceLimitHint extends ConsumerWidget {
 
     return tokenAsync.when(
       loading: () => const SizedBox.shrink(),
-      error: (_, _) => const SizedBox.shrink(),
+      error: (context, error) => const SizedBox.shrink(),
       data: (currentToken) {
         if (devicesState is! FeatureReady<List<Device>>) return const SizedBox.shrink();
         final devices = devicesState.data;
@@ -58,3 +58,4 @@ class DeviceLimitHint extends ConsumerWidget {
     );
   }
 }
+
