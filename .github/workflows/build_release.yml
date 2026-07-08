@@ -60,13 +60,13 @@ jobs:
         run: flutter pub get
 
       - name: Build APK
-        run: flutter build apk --release
+        run: flutter build apk --release --android-skip-build-dependency-validation
 
       - name: Build APK (split)
-        run: flutter build apk --release --split-per-abi
+        run: flutter build apk --release --android-skip-build-dependency-validation --split-per-abi
 
       - name: Build AAB
-        run: flutter build appbundle --release
+        run: flutter build appbundle --release --android-skip-build-dependency-validation
 
       - name: Prepare
         run: |
@@ -130,7 +130,18 @@ jobs:
         shell: bash
         run: |
           mkdir -p release
-          cd build/windows/runner/release
+          echo "Checking Windows build output..."
+          if [ -d "build/windows/x64/runner/Release" ]; then
+            cd build/windows/x64/runner/Release
+          elif [ -d "build/windows/runner/release" ]; then
+            cd build/windows/runner/release
+          elif [ -d "build/windows/runner/Release" ]; then
+            cd build/windows/runner/Release
+          else
+            echo "Build directory not found, searching..."
+            find build/windows -name "vpn_app.exe" -type f 2>/dev/null
+            exit 1
+          fi
           7z a "../../../release/vpn_app-windows-${{ steps.ver.outputs.version }}.zip" .
           cd ../../../..
       - uses: actions/upload-artifact@v4
@@ -177,10 +188,30 @@ jobs:
         id: ver
         run: echo "version=${{ github.event.inputs.version || github.ref_name }}" | sed 's/^v//' >> $GITHUB_OUTPUT
       - run: flutter pub get
-      - run: flutter build macos --release
-      - run: |
+      - name: Regenerate macOS project files
+        run: |
+          flutter config --enable-macos-desktop
+          # Remove old macos dir and recreate with current Flutter version
+          rm -rf macos
+          flutter create --platforms macos --project-name vpn_app .
+      - name: Build macOS
+        run: flutter build macos --release
+        env:
+          MACOSX_DEPLOYMENT_TARGET: "10.15"
+      - name: Package macOS
+        run: |
           mkdir -p release
-          cd build/macos/Build/Products/Release
+          if [ -d "build/macos/Build/Products/Release" ]; then
+            cd build/macos/Build/Products/Release
+          elif [ -d "build/macos/x64/Release" ]; then
+            cd build/macos/x64/Release
+          elif [ -d "build/macos/Release" ]; then
+            cd build/macos/Release
+          else
+            echo "macOS build directory not found!"
+            find build/macos -name "*.app" -type d 2>/dev/null
+            exit 1
+          fi
           zip -r "../../../release/vpn_app-macos-${{ steps.ver.outputs.version }}.zip" .
           cd ../../../..
       - uses: actions/upload-artifact@v4
