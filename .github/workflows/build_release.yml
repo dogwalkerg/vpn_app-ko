@@ -53,7 +53,8 @@ jobs:
           echo "version=$VER" >> $GITHUB_OUTPUT
 
       - name: Update pubspec
-        run: sed -i "s/version: .*/version: ${{ steps.ver.outputs.version }}+1/" pubspec.yaml
+        run: |
+          sed -i "s/version: .*/version: ${{ steps.ver.outputs.version }}+1/" pubspec.yaml
 
       - name: Flutter pub get
         run: flutter pub get
