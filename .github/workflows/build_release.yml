@@ -48,7 +48,7 @@ jobs:
       - name: Set version
         id: ver
         run: |
-          VER="${{ github.event.inputs.version || github.ref_name }}"
+          VER="${GITHUB_REF_NAME#v}"
           VER="${VER#v}"
           echo "version=$VER" >> $GITHUB_OUTPUT
 
@@ -95,7 +95,7 @@ jobs:
           channel: 'stable'
       - name: Set version
         id: ver
-        run: echo "version=${{ github.event.inputs.version || github.ref_name }}" | sed 's/^v//' >> $GITHUB_OUTPUT
+        run: echo "version=${GITHUB_REF_NAME#v}" >> $GITHUB_OUTPUT
       - run: flutter pub get
       - run: flutter build web --release
       - run: |
@@ -129,7 +129,8 @@ jobs:
       - name: Package
         shell: bash
         run: |
-          mkdir -p release
+          RELEASE_DIR="$(pwd)/release"
+          mkdir -p "$RELEASE_DIR"
           echo "Checking Windows build output..."
           if [ -d "build/windows/x64/runner/Release" ]; then
             cd build/windows/x64/runner/Release
@@ -142,8 +143,8 @@ jobs:
             find build/windows -name "vpn_app.exe" -type f 2>/dev/null
             exit 1
           fi
-          7z a "../../../release/vpn_app-windows-${{ steps.ver.outputs.version }}.zip" .
-          cd ../../../..
+          7z a "$RELEASE_DIR/vpn_app-windows-${{ steps.ver.outputs.version }}.zip" .
+          cd "$RELEASE_DIR/../.."
       - uses: actions/upload-artifact@v4
         with:
           name: windows-build
@@ -229,8 +230,7 @@ jobs:
       - name: Set version
         id: ver
         run: |
-          V="${{ github.event.inputs.version || github.ref_name }}"
-          V="${V#v}"
+          V="${GITHUB_REF_NAME#v}"
           echo "version=$V" >> $GITHUB_OUTPUT
 
       - uses: actions/download-artifact@v4
