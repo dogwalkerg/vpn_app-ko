@@ -34,7 +34,7 @@ jobs:
       - name: Set up Flutter
         uses: subosito/flutter-action@v2
         with:
-          flutter-version: '3.27.4'
+          flutter-version: ''
           channel: 'stable'
 
       - name: Create keystore
@@ -91,7 +91,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: subosito/flutter-action@v2
         with:
-          flutter-version: '3.27.4'
+          flutter-version: ''
           channel: 'stable'
       - name: Set version
         id: ver
@@ -118,7 +118,7 @@ jobs:
           distribution: 'zulu'
       - uses: subosito/flutter-action@v2
         with:
-          flutter-version: '3.27.4'
+          flutter-version: ''
           channel: 'stable'
       - name: Set version
         id: ver
@@ -147,7 +147,7 @@ jobs:
       - run: sudo apt-get update && sudo apt-get install -y clang cmake ninja-build pkg-config libgtk-3-dev liblzma-dev libsecret-1-dev
       - uses: subosito/flutter-action@v2
         with:
-          flutter-version: '3.27.4'
+          flutter-version: ''
           channel: 'stable'
       - name: Set version
         id: ver
@@ -170,7 +170,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: subosito/flutter-action@v2
         with:
-          flutter-version: '3.27.4'
+          flutter-version: ''
           channel: 'stable'
           architecture: x64
       - name: Set version
