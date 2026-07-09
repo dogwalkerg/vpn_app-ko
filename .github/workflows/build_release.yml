@@ -1,278 +1,84 @@
-name: Build & Release All Platforms
+name: Flutter CI
 
 on:
-  workflow_dispatch:
-    inputs:
-      version:
-        description: 'Release version (e.g. 1.0.0)'
-        required: true
-        default: '1.0.0'
-      version_code:
-        description: 'Version code (integer)'
-        required: true
-        default: '1'
-
   push:
-    tags:
-      - 'v*'
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+env:
+  BASE_URL: "https://app.xsh.ccwu.cc"
 
 jobs:
+  analyze:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+    - uses: subosito/flutter-action@v2
+      with:
+        channel: stable
+        flutter-version: 3.24.x
+    - run: flutter pub get
+    - run: flutter format --set-exit-if-changed .
+    - run: flutter analyze
+
+  test:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+    - uses: subosito/flutter-action@v2
+      with:
+        channel: stable
+        flutter-version: 3.24.x
+    - run: flutter pub get
+    - run: flutter test
+
   build-android:
-    name: Build Android
     runs-on: ubuntu-latest
-    timeout-minutes: 60
-
     steps:
-      - uses: actions/checkout@v4
-
-      - name: Set up Java 17
-        uses: actions/setup-java@v4
-        with:
-          java-version: '17'
-          distribution: 'zulu'
-
-      - name: Set up Flutter
-        uses: subosito/flutter-action@v2
-        with:
-          flutter-version: ''
-          channel: 'stable'
-
-      - name: Create keystore
-        run: |
-          mkdir -p android/keystore
-          keytool -genkey -v -keystore android/keystore/my-release-key.jks \
-            -alias my-key-alias -keyalg RSA -keysize 2048 -validity 10000 \
-            -storepass 33772744 -keypass 33772744 \
-            -dname "CN=VPN App, OU=Dev, O=VPN, L=City, ST=State, C=US"
-
-      - name: Set version
-        id: ver
-        run: |
-          VER="${GITHUB_REF_NAME#v}"
-          VER="${VER#v}"
-          echo "version=$VER" >> $GITHUB_OUTPUT
-
-      - name: Update pubspec
-        run: |
-          sed -i "s/version: .*/version: ${{ steps.ver.outputs.version }}+1/" pubspec.yaml
-
-      - name: Flutter pub get
-        run: flutter pub get
-
-      - name: Build APK
-        run: flutter build apk --release --android-skip-build-dependency-validation
-
-      - name: Build APK (split)
-        run: flutter build apk --release --android-skip-build-dependency-validation --split-per-abi
-
-      - name: Build AAB
-        run: flutter build appbundle --release --android-skip-build-dependency-validation
-
-      - name: Prepare
-        run: |
-          mkdir -p release
-          cp build/app/outputs/flutter-apk/app-release.apk release/vpn_app-android-universal-${{ steps.ver.outputs.version }}.apk
-          cp build/app/outputs/bundle/release/app-release.aab release/vpn_app-android-${{ steps.ver.outputs.version }}.aab
-          [ -f build/app/outputs/flutter-apk/app-arm64-v8a-release.apk ] && \
-            cp build/app/outputs/flutter-apk/app-arm64-v8a-release.apk release/vpn_app-android-arm64-${{ steps.ver.outputs.version }}.apk
-          [ -f build/app/outputs/flutter-apk/app-armeabi-v7a-release.apk ] && \
-            cp build/app/outputs/flutter-apk/app-armeabi-v7a-release.apk release/vpn_app-android-v7a-${{ steps.ver.outputs.version }}.apk
-
-      - uses: actions/upload-artifact@v4
-        with:
-          name: android-build
-          path: release/
-
-  build-web:
-    name: Build Web
-    runs-on: ubuntu-latest
-    timeout-minutes: 30
-    steps:
-      - uses: actions/checkout@v4
-      - uses: subosito/flutter-action@v2
-        with:
-          flutter-version: ''
-          channel: 'stable'
-      - name: Set version
-        id: ver
-        run: echo "version=${GITHUB_REF_NAME#v}" >> $GITHUB_OUTPUT
-      - run: flutter pub get
-      - run: flutter build web --release
-      - run: |
-          mkdir -p release
-          cd build/web && zip -r "../../release/vpn_app-web-${{ steps.ver.outputs.version }}.zip" . && cd ../..
-      - uses: actions/upload-artifact@v4
-        with:
-          name: web-build
-          path: release/
+    - uses: actions/checkout@v4
+    - uses: subosito/flutter-action@v2
+      with:
+        channel: stable
+        flutter-version: 3.24.x
+    - run: flutter pub get
+    - run: flutter build apk --release --dart-define=BASE_URL=${{ env.BASE_URL }}
+    - uses: actions/upload-artifact@v4
+      with:
+        name: app-release-apk
+        path: build/app/outputs/flutter-apk/app-release.apk
+        if-no-files-found: warn
 
   build-windows:
-    name: Build Windows
     runs-on: windows-latest
-    timeout-minutes: 60
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-java@v4
-        with:
-          java-version: '17'
-          distribution: 'zulu'
-      - uses: subosito/flutter-action@v2
-        with:
-          flutter-version: ''
-          channel: 'stable'
-      - name: Set version
-        id: ver
-        shell: bash
-        run: echo "version=${{ github.event.inputs.version || github.ref_name }}" | sed 's/^v//' >> $GITHUB_OUTPUT
-      - run: flutter pub get
-      - run: flutter build windows --release
-      - name: Package
-        shell: bash
-        run: |
-          RELEASE_DIR="$(pwd)/release"
-          mkdir -p "$RELEASE_DIR"
-          echo "Checking Windows build output..."
-          if [ -d "build/windows/x64/runner/Release" ]; then
-            cd build/windows/x64/runner/Release
-          elif [ -d "build/windows/runner/release" ]; then
-            cd build/windows/runner/release
-          elif [ -d "build/windows/runner/Release" ]; then
-            cd build/windows/runner/Release
-          else
-            echo "Build directory not found, searching..."
-            find build/windows -name "vpn_app.exe" -type f 2>/dev/null
-            exit 1
-          fi
-          7z a "$RELEASE_DIR/vpn_app-windows-${{ steps.ver.outputs.version }}.zip" .
-          cd "$RELEASE_DIR/../.."
-      - uses: actions/upload-artifact@v4
-        with:
-          name: windows-build
-          path: release/
-
-  build-linux:
-    name: Build Linux
-    runs-on: ubuntu-latest
-    timeout-minutes: 60
-    steps:
-      - uses: actions/checkout@v4
-      - run: sudo apt-get update && sudo apt-get install -y clang cmake ninja-build pkg-config libgtk-3-dev liblzma-dev libsecret-1-dev libayatana-appindicator3-dev libjsoncpp-dev
-      - uses: subosito/flutter-action@v2
-        with:
-          flutter-version: ''
-          channel: 'stable'
-      - name: Set version
-        id: ver
-        run: echo "version=${{ github.event.inputs.version || github.ref_name }}" | sed 's/^v//' >> $GITHUB_OUTPUT
-      - run: flutter pub get
-      - run: flutter build linux --release
-      - run: |
-          mkdir -p release
-          tar czf release/vpn_app-linux-${{ steps.ver.outputs.version }}.tar.gz -C build/linux/x64/release/bundle .
-      - uses: actions/upload-artifact@v4
-        with:
-          name: linux-build
-          path: release/
+    - uses: actions/checkout@v4
+    - uses: subosito/flutter-action@v2
+      with:
+        channel: stable
+        flutter-version: 3.24.x
+    - run: flutter pub get
+    - run: flutter config --enable-windows-desktop
+    - run: flutter build windows --release --dart-define=BASE_URL=${{ env.BASE_URL }}
+    - uses: actions/upload-artifact@v4
+      with:
+        name: app-release-windows
+        path: build/windows/runner/Release/
+        if-no-files-found: warn
 
   build-macos:
-    name: Build macOS
     runs-on: macos-latest
-    timeout-minutes: 90
     steps:
-      - uses: actions/checkout@v4
-      - uses: subosito/flutter-action@v2
-        with:
-          flutter-version: ''
-          channel: 'stable'
-          architecture: x64
-      - name: Set version
-        id: ver
-        run: echo "version=${{ github.event.inputs.version || github.ref_name }}" | sed 's/^v//' >> $GITHUB_OUTPUT
-      - run: flutter pub get
-      - name: Regenerate macOS project files
-        run: |
-          flutter config --enable-macos-desktop
-          # Remove old macos dir and recreate with current Flutter version
-          rm -rf macos
-          flutter create --platforms macos --project-name vpn_app .
-      - name: Build macOS
-        run: flutter build macos --release
-        env:
-          MACOSX_DEPLOYMENT_TARGET: "10.15"
-      - name: Package macOS
-        run: |
-          mkdir -p release
-          if [ -d "build/macos/Build/Products/Release" ]; then
-            cd build/macos/Build/Products/Release
-          elif [ -d "build/macos/x64/Release" ]; then
-            cd build/macos/x64/Release
-          elif [ -d "build/macos/Release" ]; then
-            cd build/macos/Release
-          else
-            echo "macOS build directory not found!"
-            find build/macos -name "*.app" -type d 2>/dev/null
-            exit 1
-          fi
-          zip -r "../../../release/vpn_app-macos-${{ steps.ver.outputs.version }}.zip" .
-          cd ../../../..
-      - uses: actions/upload-artifact@v4
-        with:
-          name: macos-build
-          path: release/
-
-  release:
-    name: Upload to FreeVPN-App-Flutter Releases
-    needs: [build-android, build-web, build-windows, build-linux, build-macos]
-    runs-on: ubuntu-latest
-    timeout-minutes: 30
-
-    steps:
-      - name: Set version
-        id: ver
-        run: |
-          V="${GITHUB_REF_NAME#v}"
-          echo "version=$V" >> $GITHUB_OUTPUT
-
-      - uses: actions/download-artifact@v4
-        with:
-          path: artifacts
-
-      - name: Collect files
-        run: |
-          mkdir -p upload
-          cp -r artifacts/*/* upload/ 2>/dev/null || true
-          ls -la upload/
-
-      - name: Create Release & Upload
-        env:
-          GH_TOKEN: ${{ secrets.GH_PAT }}
-        run: |
-          VER="${{ steps.ver.outputs.version }}"
-          TAG="v${VER}"
-
-          # Create release on FreeVPN-App-Flutter
-          echo "Creating release $TAG on FreeVPN-App-Flutter..."
-          gh release create "$TAG" \
-            --repo "dogwalkerg/FreeVPN-App-Flutter" \
-            --title "VPN App $VER" \
-            --notes "## VPN App v$VER
-
-          Build for all platforms.
-
-          ### Downloads
-          - **Android**: APK (universal + arm64 + v7a) + AAB
-          - **Windows**: Portable ZIP
-          - **Linux**: Portable tar.gz
-          - **macOS**: Build bundle ZIP
-          - **Web**: ZIP archive" \
-            --draft=false \
-            --prerelease=false
-
-          # Upload all assets
-          for f in upload/*; do
-            echo "Uploading: $(basename "$f")"
-            gh release upload "$TAG" "$f" --repo "dogwalkerg/FreeVPN-App-Flutter" --clobber
-          done
-
-          echo "=== Done! All uploaded to FreeVPN-App-Flutter ==="
-          echo "Release URL: https://github.com/dogwalkerg/FreeVPN-App-Flutter/releases/tag/$TAG"
+    - uses: actions/checkout@v4
+    - uses: subosito/flutter-action@v2
+      with:
+        channel: stable
+        flutter-version: 3.24.x
+    - run: flutter pub get
+    - run: flutter config --enable-macos-desktop
+    - run: flutter build macos --release --dart-define=BASE_URL=${{ env.BASE_URL }}
+    - uses: actions/upload-artifact@v4
+      with:
+        name: app-release-macos
+        path: build/macos/Build/Products/Release/
+        if-no-files-found: warn
