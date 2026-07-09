@@ -1,16 +1,12 @@
 ﻿name: Flutter CI
 
 on:
-  push:
-    branches: [ main ]
-  pull_request:
-    branches: [ main ]
   workflow_dispatch:
     inputs:
       version:
         description: "Release version"
         required: false
-        default: "1.0.2"
+        default: "1.0.3"
 
 env:
   BASE_URL: "https://app.xsh.ccwu.cc"
@@ -54,26 +50,35 @@ jobs:
         channel: stable
         flutter-version: 3.44.x
     - run: flutter create --platforms=ios,macos .
-    - name: Set Apple deployment targets
+    - name: Set iOS deployment target
       run: |
         python3 - <<'PY'
         from pathlib import Path
-        targets = [(Path('ios/Podfile'), 'ios', '15.0'), (Path('macos/Podfile'), 'osx', '12.0')]
-        for path, platform, version in targets:
-            text = path.read_text()
-            lines = text.splitlines()
-            replaced = False
-            for i, line in enumerate(lines):
-                stripped = line.strip()
-                if stripped.startswith(f'platform :{platform}') or stripped.startswith(f'# platform :{platform}'):
-                    lines[i] = f"platform :{platform}, '{version}'"
-                    replaced = True
-            if not replaced:
-                lines.insert(0, f"platform :{platform}, '{version}'")
-            path.write_text('\n'.join(lines) + '\n')
+        podfile = Path('ios/Podfile')
+        lines = podfile.read_text().splitlines()
+        out = []
+        done = False
+        for line in lines:
+            stripped = line.strip()
+            if stripped.startswith('platform :ios') or stripped.startswith('# platform :ios'):
+                if not done:
+                    out.append("platform :ios, '15.0'")
+                    done = True
+                continue
+            out.append(line)
+        if not done:
+            out.insert(0, "platform :ios, '15.0'")
+        podfile.write_text('\n'.join(out) + '\n')
+        pbx = Path('ios/Runner.xcodeproj/project.pbxproj')
+        text = pbx.read_text().replace('IPHONEOS_DEPLOYMENT_TARGET = 13.0;', 'IPHONEOS_DEPLOYMENT_TARGET = 15.0;')
+        text = text.replace('IPHONEOS_DEPLOYMENT_TARGET = 12.0;', 'IPHONEOS_DEPLOYMENT_TARGET = 15.0;')
+        pbx.write_text(text)
         PY
-        grep -n "platform" ios/Podfile macos/Podfile
+        grep -n "platform" ios/Podfile
+        grep -n "IPHONEOS_DEPLOYMENT_TARGET" ios/Runner.xcodeproj/project.pbxproj || true
     - run: flutter pub get
+    - name: Update CocoaPods specs
+      run: pod repo update
     - run: flutter build ios --release --no-codesign --dart-define=BASE_URL=${{ env.BASE_URL }}
     - name: Package IPA (unsigned)
       run: |
@@ -99,10 +104,13 @@ jobs:
     - run: flutter pub get
     - run: flutter config --enable-windows-desktop
     - run: flutter build windows --release --dart-define=BASE_URL=${{ env.BASE_URL }}
+    - name: Show Windows build output
+      shell: pwsh
+      run: Get-ChildItem -Recurse build/windows | Select-Object FullName,Length | Out-String -Width 240
     - uses: actions/upload-artifact@v4
       with:
         name: app-release-windows
-        path: build/windows/runner/Release/
+        path: build/windows/x64/runner/Release/
         if-no-files-found: error
 
   build-macos:
@@ -115,25 +123,32 @@ jobs:
         channel: stable
         flutter-version: 3.44.x
     - run: flutter create --platforms=ios,macos .
-    - name: Set Apple deployment targets
+    - name: Set macOS deployment target
       run: |
         python3 - <<'PY'
         from pathlib import Path
-        targets = [(Path('ios/Podfile'), 'ios', '15.0'), (Path('macos/Podfile'), 'osx', '12.0')]
-        for path, platform, version in targets:
-            text = path.read_text()
-            lines = text.splitlines()
-            replaced = False
-            for i, line in enumerate(lines):
-                stripped = line.strip()
-                if stripped.startswith(f'platform :{platform}') or stripped.startswith(f'# platform :{platform}'):
-                    lines[i] = f"platform :{platform}, '{version}'"
-                    replaced = True
-            if not replaced:
-                lines.insert(0, f"platform :{platform}, '{version}'")
-            path.write_text('\n'.join(lines) + '\n')
+        podfile = Path('macos/Podfile')
+        lines = podfile.read_text().splitlines()
+        out = []
+        done = False
+        for line in lines:
+            stripped = line.strip()
+            if stripped.startswith('platform :osx') or stripped.startswith('# platform :osx'):
+                if not done:
+                    out.append("platform :osx, '12.0'")
+                    done = True
+                continue
+            out.append(line)
+        if not done:
+            out.insert(0, "platform :osx, '12.0'")
+        podfile.write_text('\n'.join(out) + '\n')
+        pbx = Path('macos/Runner.xcodeproj/project.pbxproj')
+        text = pbx.read_text().replace('MACOSX_DEPLOYMENT_TARGET = 10.15;', 'MACOSX_DEPLOYMENT_TARGET = 12.0;')
+        text = text.replace('MACOSX_DEPLOYMENT_TARGET = 11.0;', 'MACOSX_DEPLOYMENT_TARGET = 12.0;')
+        pbx.write_text(text)
         PY
-        grep -n "platform" ios/Podfile macos/Podfile
+        grep -n "platform" macos/Podfile
+        grep -n "MACOSX_DEPLOYMENT_TARGET" macos/Runner.xcodeproj/project.pbxproj || true
     - run: flutter pub get
     - run: flutter config --enable-macos-desktop
     - run: flutter build macos --release --dart-define=BASE_URL=${{ env.BASE_URL }}
@@ -150,20 +165,7 @@ jobs:
     steps:
     - uses: actions/download-artifact@v4
       with:
-        name: app-release-apk
-        path: artifacts/apk
-    - uses: actions/download-artifact@v4
-      with:
-        name: app-release-ipa
-        path: artifacts/ipa
-    - uses: actions/download-artifact@v4
-      with:
-        name: app-release-windows
-        path: artifacts/windows
-    - uses: actions/download-artifact@v4
-      with:
-        name: app-release-macos
-        path: artifacts/macos
+        path: artifacts
     - name: Create Release
       uses: softprops/action-gh-release@v2
       with:
