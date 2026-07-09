@@ -6,36 +6,36 @@ import '../domain/payment_status.dart';
 class PaymentInitDto {
   final String id;
   final String confirmationUrl;
+  final PaymentStatus status;
   final PaymentMethod? method;
   final double? amount;
 
   PaymentInitDto({
     required this.id,
     required this.confirmationUrl,
+    required this.status,
     this.method,
     this.amount,
   });
 
   factory PaymentInitDto.fromMap(Map<String, dynamic> map) {
     final pid = map['paymentId'] as String?;
-    final url = map['confirmationUrl'] as String?;
-    if (pid == null || url == null) {
+    if (pid == null || pid.isEmpty) {
       throw const FormatException('支付初始化数据无效');
     }
-    final rawMethod = map['method'] as String?;
-    final amount = (map['amount'] as num?)?.toDouble();
 
     return PaymentInitDto(
       id: pid,
-      confirmationUrl: url,
-      method: _methodFromRawOrNull(rawMethod),
-      amount: amount,
+      confirmationUrl: (map['confirmationUrl'] as String?) ?? '',
+      status: parsePaymentStatus((map['status'] as String?) ?? 'pending'),
+      method: _methodFromRawOrNull(map['method'] as String?),
+      amount: (map['amount'] as num?)?.toDouble(),
     );
   }
 
   Payment toDomain() => Payment(
         id: id,
-        status: PaymentStatus.pending,
+        status: status,
         confirmationUrl: confirmationUrl,
         method: method,
         amount: amount,
@@ -44,12 +44,8 @@ class PaymentInitDto {
 
 PaymentMethod? _methodFromRawOrNull(String? raw) {
   switch (raw) {
-    case 'bank_card':
-      return PaymentMethod.bankCard;
-    case 'sbp':
-      return PaymentMethod.sbp;
-    case 'sberbank':
-      return PaymentMethod.sberpay;
+    case 'balance':
+      return PaymentMethod.balance;
     default:
       return null;
   }

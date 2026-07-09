@@ -61,6 +61,11 @@ class PaymentController extends StateNotifier<PaymentState> {
     try {
       final created =
           await createPayment(amount: amount, method: method, planId: planId, cancelToken: ct);
+      if (created.status == PaymentStatus.succeeded) {
+        state = PaymentSucceeded(created);
+        _cancel();
+        return;
+      }
       state = PaymentReady(created);
 
       _sub = pollStatus(created.id, cancelToken: ct).listen((st) {

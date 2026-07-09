@@ -106,7 +106,7 @@ class _SubscriptionScreenState extends ConsumerState<SubscriptionScreen> {
     final ctrl = ref.read(paymentControllerProvider.notifier);
     final cfg = ref.read(appConfigProvider);
 
-    if (!_isWebViewOpen && next is PaymentReady) {
+    if (!_isWebViewOpen && next is PaymentReady && (next.payment.confirmationUrl ?? '').isNotEmpty) {
       _isWebViewOpen = true;
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (!mounted) return;
@@ -197,6 +197,11 @@ class _SubscriptionScreenState extends ConsumerState<SubscriptionScreen> {
               statusText: desc.statusText,
               periodText: desc.periodText,
               statusColor: desc.statusColor,
+            ),
+            SizedBox(height: t.spacing.sm),
+            Text(
+              '账户余额：${ready.status.balance.toStringAsFixed(2)}',
+              style: t.typography.body.copyWith(color: c.primary),
             ),
             SizedBox(height: t.spacing.lg),
             if (!ready.status.isPaid || ready.status.isTrial)
