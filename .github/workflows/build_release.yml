@@ -1,4 +1,5 @@
 name: Flutter CI
+
 on:
   push:
     branches: [ main ]
@@ -10,8 +11,10 @@ on:
         description: "Release version"
         required: false
         default: "1.0.0"
+
 env:
   BASE_URL: "https://app.xsh.ccwu.cc"
+
 jobs:
   analyze:
     runs-on: ubuntu-latest
@@ -23,6 +26,7 @@ jobs:
         flutter-version: 3.29.x
     - run: flutter pub get
     - run: flutter analyze || true
+
   build-android:
     runs-on: ubuntu-latest
     needs: analyze
@@ -39,6 +43,29 @@ jobs:
         name: app-release-apk
         path: build/app/outputs/flutter-apk/app-release.apk
         if-no-files-found: warn
+
+  build-ios:
+    runs-on: macos-latest
+    needs: analyze
+    steps:
+    - uses: actions/checkout@v4
+    - uses: subosito/flutter-action@v2
+      with:
+        channel: stable
+        flutter-version: 3.29.x
+    - run: flutter pub get
+    - run: flutter build ios --release --no-codesign --dart-define=BASE_URL=${{ env.BASE_URL }}
+    - name: Package IPA
+      run: |
+        mkdir -p Payload
+        cp -r build/ios/iphoneos/Runner.app Payload/
+        zip -r app-release-unsigned.ipa Payload/
+    - uses: actions/upload-artifact@v4
+      with:
+        name: app-release-ipa
+        path: app-release-unsigned.ipa
+        if-no-files-found: warn
+
   build-windows:
     runs-on: windows-latest
     needs: analyze
@@ -56,6 +83,7 @@ jobs:
         name: app-release-windows
         path: build/windows/runner/Release/
         if-no-files-found: warn
+
   build-macos:
     runs-on: macos-latest
     needs: analyze
@@ -73,8 +101,9 @@ jobs:
         name: app-release-macos
         path: build/macos/Build/Products/Release/
         if-no-files-found: warn
+
   release:
-    needs: [build-android, build-windows, build-macos]
+    needs: [build-android, build-ios, build-windows, build-macos]
     runs-on: ubuntu-latest
     if: github.event_name == 'workflow_dispatch'
     steps:
@@ -82,6 +111,10 @@ jobs:
       with:
         name: app-release-apk
         path: artifacts/apk
+    - uses: actions/download-artifact@v4
+      with:
+        name: app-release-ipa
+        path: artifacts/ipa
     - uses: actions/download-artifact@v4
       with:
         name: app-release-windows
@@ -95,7 +128,7 @@ jobs:
       with:
         tag_name: v${{ github.event.inputs.version }}
         name: Release v${{ github.event.inputs.version }}
-        body: "Auto-built release"
+        body: "Android APK + iOS IPA + Windows + macOS"
         files: artifacts/**/*
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
