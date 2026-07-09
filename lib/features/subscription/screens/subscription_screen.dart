@@ -1,4 +1,4 @@
-// lib/features/subscription/screens/subscription_screen.dart
+﻿// lib/features/subscription/screens/subscription_screen.dart
 import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -45,7 +45,7 @@ class _SubscriptionScreenState extends ConsumerState<SubscriptionScreen> {
   // ===== Helpers UI =====
 
   ThemedScaffold _screen(Widget body) =>
-      ThemedScaffold(appBar: const AppCustomAppBar(title: 'Подписка'), body: body);
+      ThemedScaffold(appBar: const AppCustomAppBar(title: '订阅'), body: body);
 
   ({String statusText, String periodText, Color statusColor}) _describeStatus(
     BuildContext context,
@@ -54,21 +54,21 @@ class _SubscriptionScreenState extends ConsumerState<SubscriptionScreen> {
     final c = context.colors;
     if (status.isTrial) {
       return (
-        statusText: 'Пробный период',
-        periodText: 'Доступ до ${status.trialEndDate.toLocalDate()}',
+        statusText: '试用期',
+        periodText: '有效期至 ${status.trialEndDate.toLocalDate()}',
         statusColor: c.info
       );
     }
     if (status.isPaid && status.paidUntil != null) {
       return (
-        statusText: 'Подписка активна',
-        periodText: 'До ${status.paidUntil!.toLocalDate()}',
+        statusText: '订阅已激活',
+        periodText: '至 ${status.paidUntil!.toLocalDate()}',
         statusColor: c.success
       );
     }
     return (
-      statusText: 'Подписка неактивна',
-      periodText: 'Нет активной подписки',
+      statusText: '订阅未激活',
+      periodText: '没有有效的订阅',
       statusColor: c.danger
     );
   }
@@ -84,7 +84,7 @@ class _SubscriptionScreenState extends ConsumerState<SubscriptionScreen> {
     ref.read(paymentControllerProvider.notifier).reset();
 
     if (!mounted) return;
-    showAppSnackbar(context, text: 'Подписка активирована!', type: AppSnackbarType.success);
+    showAppSnackbar(context, text: '订阅已激活！', type: AppSnackbarType.success);
   }
 
   void _onPaymentStateChanged(PaymentState? prev, PaymentState next) {
@@ -162,7 +162,7 @@ class _SubscriptionScreenState extends ConsumerState<SubscriptionScreen> {
               Text(paymentError, style: t.typography.body.copyWith(color: c.danger)),
               SizedBox(height: t.spacing.md),
               PrimaryButton(
-                label: 'Попробовать снова',
+                label: '重试',
                 onPressed: ref.read(paymentControllerProvider.notifier).reset,
                 icon: Icons.refresh_rounded,
               ),
@@ -188,7 +188,7 @@ class _SubscriptionScreenState extends ConsumerState<SubscriptionScreen> {
               (isPolling
                   ? const SubscriptionConfirmingBlock()
                   : PrimaryButton(
-                      label: 'Оплатить',
+                      label: '支付',
                       icon: Icons.diamond_rounded,
                       onPressed: () => showPaymentMethodSheet(context, ref),
                     )),
@@ -213,13 +213,14 @@ class _SubscriptionScreenState extends ConsumerState<SubscriptionScreen> {
         return _screen(
           Padding(
             padding: t.spacing.all(t.spacing.lg),
-            child: Text('Ошибка: $message', style: t.typography.body.copyWith(color: c.danger)),
+            child: Text('错误: $message', style: t.typography.body.copyWith(color: c.danger)),
           ),
         );
       case SubscriptionReady():
         return _buildReadyBody(subState);
       default:
-        return _screen(const Center(child: Text('Нет данных по подписке')));
+        return _screen(const Center(child: Text('暂无订阅数据')));
     }
   }
 }
+

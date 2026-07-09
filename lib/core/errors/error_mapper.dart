@@ -20,7 +20,7 @@ Never throwFromResponse(Response res) {
     }
   }
 
-  msg ??= 'Ошибка: $status';
+  msg ??= '袨褕懈斜泻邪: $status';
   if (status == 401) throw UnauthorizedException(msg);
   throw ApiException(msg, status, code);
 }
@@ -31,20 +31,18 @@ ApiException mapDioError(DioException e) {
     case DioExceptionType.receiveTimeout:
     case DioExceptionType.sendTimeout:
     case DioExceptionType.connectionError:
-      return const ApiException('Проблема с сетью. Проверьте подключение.');
+      return const ApiException('网络连接问题，请检查网络设置。');
     case DioExceptionType.badCertificate:
-      return const ApiException('Проблема с сертификатом соединения.');
+      return const ApiException('连接证书验证失败。');
     case DioExceptionType.cancel:
-      return const ApiException('Запрос отменён пользователем.');
+      return const ApiException("请求已被用户取消。");
     case DioExceptionType.badResponse:
       return ApiException(
-        e.message ?? 'Ошибка ответа сервера',
+        e.message ?? "服务器响应错误",
         e.response?.statusCode,
       );
     case DioExceptionType.unknown:
-      return ApiException(e.message ?? 'Неизвестная ошибка', e.response?.statusCode);
-    case DioExceptionType.transformTimeout:
-      return const ApiException('Тайм-аут обработки запроса.');
+    return ApiException(e.message ?? "未知错误", e.response?.statusCode);
   }
 }
 

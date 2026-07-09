@@ -1,4 +1,4 @@
-// lib/features/payments/screens/payment_webview_screen.dart
+﻿// lib/features/payments/screens/payment_webview_screen.dart
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 import 'package:vpn_app/core/extensions/context_ext.dart';
@@ -43,7 +43,7 @@ class PaymentWebViewScreen extends StatelessWidget {
 
     return ThemedScaffold(
       appBar: AppCustomAppBar(
-        title: 'Оплата',
+        title: '袨锌谢邪褌邪',
         leading: IconButton(
           icon: Icon(Icons.close, color: c.textMuted),
           onPressed: () {
@@ -67,4 +67,5 @@ class PaymentWebViewScreen extends StatelessWidget {
     );
   }
 }
+
 

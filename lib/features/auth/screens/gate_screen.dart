@@ -1,4 +1,4 @@
-// lib/features/auth/screens/gate_screen.dart
+﻿// lib/features/auth/screens/gate_screen.dart
 import 'package:flutter/material.dart';
 import 'package:vpn_app/core/extensions/context_ext.dart';
 import 'package:vpn_app/ui/widgets/themed_scaffold.dart';
@@ -20,11 +20,12 @@ class GateScreen extends StatelessWidget {
             SizedBox(height: t.spacing.sm),
             CircularProgressIndicator(color: c.primary),
             SizedBox(height: t.spacing.xs),
-            Text('Проверяем сессию...', style: t.typography.body.copyWith(color: c.textMuted)),
+            Text('袩褉芯胁械褉褟械屑 褋械褋褋懈褞...', style: t.typography.body.copyWith(color: c.textMuted)),
           ],
         ),
       ),
     );
   }
 }
+
 

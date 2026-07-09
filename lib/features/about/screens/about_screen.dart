@@ -1,4 +1,4 @@
-// lib/features/about/screens/about_screen.dart
+﻿// lib/features/about/screens/about_screen.dart
 import 'package:flutter/material.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:vpn_app/core/extensions/context_ext.dart';
@@ -21,7 +21,7 @@ class AboutScreen extends StatelessWidget {
     final t = context.tokens;
 
     return ThemedScaffold(
-      appBar: const AppCustomAppBar(title: 'О приложении'),
+      appBar: const AppCustomAppBar(title: '袨 锌褉懈谢芯卸械薪懈懈'),
       body: Center(
         child: SingleChildScrollView(
           padding: t.spacing.all(t.spacing.md),
@@ -52,7 +52,7 @@ class AboutScreen extends StatelessWidget {
                       ),
                       SizedBox(height: t.spacing.md),
                       Text(
-                        'UgbuganVPN — это про надёжность, скорость и колорит!',
+                        'UgbuganVPN 鈥?褝褌芯 锌褉芯 薪邪写褢卸薪芯褋褌褜, 褋泻芯褉芯褋褌褜 懈 泻芯谢芯褉懈褌!',
                         textAlign: TextAlign.center,
                         style: t.typography.body.copyWith(
                           color: c.textMuted,
@@ -71,7 +71,7 @@ class AboutScreen extends StatelessWidget {
                     crossAxisAlignment: CrossAxisAlignment.center,
                     children: [
                       Text(
-                        'Версия',
+                        '袙械褉褋懈褟',
                         textAlign: TextAlign.center,
                         style: t.typography.h3.copyWith(
                           color: c.text,
@@ -86,7 +86,7 @@ class AboutScreen extends StatelessWidget {
                       ),
                       SizedBox(height: t.spacing.sm),
                       Text(
-                        'Разработчики',
+                        '袪邪蟹褉邪斜芯褌褔懈泻懈',
                         textAlign: TextAlign.center,
                         style: t.typography.h3.copyWith(
                           color: c.text,
@@ -95,7 +95,7 @@ class AboutScreen extends StatelessWidget {
                       ),
                       SizedBox(height: t.spacing.xxs),
                       Text(
-                        'Абдурахманов Гасан\nШамов Гаджикурбан',
+                        '袗斜写褍褉邪褏屑邪薪芯胁 袚邪褋邪薪\n楔邪屑芯胁 袚邪写卸懈泻褍褉斜邪薪',
                         textAlign: TextAlign.center,
                         style: t.typography.bodySm.copyWith(color: c.textMuted),
                       ),
@@ -111,12 +111,12 @@ class AboutScreen extends StatelessWidget {
                   children: [
                     IconButton(
                       icon: Icon(Icons.email, color: c.primary, size: t.icons.xl),
-                      tooltip: 'Почта',
+                      tooltip: '袩芯褔褌邪',
                       onPressed: () async {
                         final uri = Uri(
                           scheme: 'mailto',
                           path: 'support@vpnapp.com',
-                          query: 'subject=Обращение через приложение',
+                          query: 'subject=袨斜褉邪褖械薪懈械 褔械褉械蟹 锌褉懈谢芯卸械薪懈械',
                         );
                         await _openUri(uri);
                       },
@@ -124,7 +124,7 @@ class AboutScreen extends StatelessWidget {
                     SizedBox(width: t.spacing.lg),
                     IconButton(
                       icon: Icon(Icons.language, color: c.primary, size: t.icons.xl),
-                      tooltip: 'Сайт',
+                      tooltip: '小邪泄褌',
                       onPressed: () async {
                         await _openUri(Uri.parse('https://ugbuganvpn.com'));
                       },
@@ -146,7 +146,7 @@ class AboutScreen extends StatelessWidget {
                   child: GestureDetector(
                     onTap: () => _openUri(Uri.parse('https://ugbuganvpn.com/privacy')),
                     child: Text(
-                      'Политика конфиденциальности',
+                      '袩芯谢懈褌懈泻邪 泻芯薪褎懈写械薪褑懈邪谢褜薪芯褋褌懈',
                       style: t.typography.body.copyWith(
                         color: c.primary,
                         decoration: TextDecoration.underline,

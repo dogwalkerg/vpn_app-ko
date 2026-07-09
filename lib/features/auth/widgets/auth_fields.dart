@@ -1,4 +1,4 @@
-// lib/features/auth/widgets/auth_fields.dart
+﻿// lib/features/auth/widgets/auth_fields.dart
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:vpn_app/ui/widgets/atoms/app_text_field.dart';
@@ -13,7 +13,7 @@ class UsernameField extends StatelessWidget {
   Widget build(BuildContext context) {
     return AppTextField(
       controller: controller,
-      label: 'Логин',
+      label: '用户名',
       leadingIcon: Icons.person,
       textInputAction: TextInputAction.next,
       autofillHints: const [AutofillHints.username],
@@ -59,7 +59,7 @@ class PasswordField extends StatefulWidget {
     required this.controller,
     this.focusNode,
     this.onSubmitted,
-    this.label = 'Пароль',
+    this.label = '密码',
     this.minLength = 6,
   });
 
@@ -91,17 +91,17 @@ class _PasswordFieldState extends State<PasswordField> {
 class CodeField extends StatelessWidget {
   final TextEditingController controller;
   final String label;
-  final int? exactLength;                 // если знаем точную длину (напр., 6)
-  final int minLength;                    // иначе используем минимум
+  final int? exactLength;                 // 械褋谢懈 蟹薪邪械屑 褌芯褔薪褍褞 写谢懈薪褍 (薪邪锌褉., 6)
+  final int minLength;                    // 懈薪邪褔械 懈褋锌芯谢褜蟹褍械屑 屑懈薪懈屑褍屑
   final TextInputAction textInputAction;
   final ValueChanged<String>? onSubmitted;
-  final VoidCallback? onCompleted;        // вызов при наборе exactLength
+  final VoidCallback? onCompleted;        // 胁褘蟹芯胁 锌褉懈 薪邪斜芯褉械 exactLength
   final FocusNode? focusNode;
 
   const CodeField({
     super.key,
     required this.controller,
-    this.label = 'Код',
+    this.label = '验证码',
     this.exactLength,
     this.minLength = 4,
     this.textInputAction = TextInputAction.done,
@@ -138,3 +138,4 @@ class CodeField extends StatelessWidget {
     );
   }
 }
+

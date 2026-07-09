@@ -1,9 +1,8 @@
-// lib/features/auth/screens/register_screen.dart
+﻿// lib/features/auth/screens/register_screen.dart
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:vpn_app/core/extensions/context_ext.dart';
-import 'package:vpn_app/core/extensions/nav_ext.dart';
 import 'package:vpn_app/core/models/feature_state.dart';
 import 'package:vpn_app/ui/widgets/app_snackbar.dart';
 import 'package:vpn_app/ui/widgets/atoms/ghost_button.dart';
@@ -53,8 +52,12 @@ class _RegisterScreenState extends ConsumerState<RegisterScreen> with AutomaticK
     if (err != null) {
       showAppSnackbar(context, text: err, type: AppSnackbarType.error);
     } else {
-      showAppSnackbar(context, text: 'Регистрация прошла успешно, проверьте email для верификации', type: AppSnackbarType.success);
-      context.goVerify(u: username, e: email);
+      showAppSnackbar(
+        context,
+        text: '注册成功，现在可以登录了',
+        type: AppSnackbarType.success,
+      );
+      context.go('/login');
     }
   }
 
@@ -66,7 +69,7 @@ class _RegisterScreenState extends ConsumerState<RegisterScreen> with AutomaticK
     final isLoading = ref.watch(authControllerProvider).isLoading;
 
     return AuthScaffold(
-      title: 'Регистрация',
+      title: '袪械谐懈褋褌褉邪褑懈褟',
       leading: IconButton(
         icon: Icon(Icons.arrow_back, color: c.textMuted),
         onPressed: () => context.pop(),
@@ -84,13 +87,13 @@ class _RegisterScreenState extends ConsumerState<RegisterScreen> with AutomaticK
             PasswordField(controller: _password, focusNode: _pwdNode),
             SizedBox(height: t.spacing.lg + t.spacing.xs),
             SecondaryButton(
-              label: 'Зарегистрироваться',
+              label: '袟邪褉械谐懈褋褌褉懈褉芯胁邪褌褜褋褟',
               onPressed: isLoading ? null : _submit,
               icon: isLoading ? null : Icons.person_add,
             ),
             SizedBox(height: t.spacing.md),
             GhostButton(
-              label: 'Уже есть аккаунт? Войти',
+              label: '校卸械 械褋褌褜 邪泻泻邪褍薪褌? 袙芯泄褌懈',
               onPressed: () => context.pop(),
             ),
           ],
@@ -99,4 +102,5 @@ class _RegisterScreenState extends ConsumerState<RegisterScreen> with AutomaticK
     );
   }
 }
+
 

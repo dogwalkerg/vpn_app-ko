@@ -1,4 +1,4 @@
-// lib/features/auth/screens/login_screen.dart
+﻿// lib/features/auth/screens/login_screen.dart
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:vpn_app/core/extensions/context_ext.dart';
@@ -58,7 +58,7 @@ Future<void> _submit() async {
     final isLoading = ref.watch(authControllerProvider).isLoading;
 
     return AuthScaffold(
-      title: 'Вход',
+      title: '袙褏芯写',
       canPop: false,
       body: Form(
         key: _formKey,
@@ -79,11 +79,11 @@ Future<void> _submit() async {
             ),
             SizedBox(height: t.spacing.xs),
             GhostButton(
-              label: 'Забыли пароль?',
+              label: '袟邪斜褘谢懈 锌邪褉芯谢褜?',
               onPressed: () {
                 final u = _username.text.trim();
                 if (u.isEmpty) {
-                  showAppSnackbar(context, text: 'Введите логин для восстановления', type: AppSnackbarType.error);
+                  showAppSnackbar(context, text: '请输入用户名以重置密码', type: AppSnackbarType.error);
                   return;
                 }
                 context.pushReset(u: u);
@@ -99,12 +99,12 @@ Future<void> _submit() async {
               ),
             SizedBox(height: t.spacing.sm),
             PrimaryButton(
-              label: 'Войти',
+              label: '袙芯泄褌懈',
               onPressed: isLoading ? null : _submit,
             ),
             SizedBox(height: t.spacing.sm),
             GhostButton(
-              label: 'Зарегистрироваться',
+              label: '袟邪褉械谐懈褋褌褉懈褉芯胁邪褌褜褋褟',
               onPressed: () => context.pushRegister(),
             ),
           ],
@@ -113,3 +113,4 @@ Future<void> _submit() async {
     );
   }
 }
+

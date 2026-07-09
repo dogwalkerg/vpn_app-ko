@@ -1,4 +1,4 @@
-// lib/features/auth/screens/verification_screen.dart
+﻿// lib/features/auth/screens/verification_screen.dart
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:vpn_app/core/extensions/context_ext.dart';
@@ -47,7 +47,7 @@ class _VerificationScreenState extends ConsumerState<VerificationScreen> with Au
     if (err != null) {
       showAppSnackbar(context, text: err, type: AppSnackbarType.error);
     } else {
-      showAppSnackbar(context, text: 'Email верифицирован! Теперь вы можете войти.', type: AppSnackbarType.success);
+      showAppSnackbar(context, text: 'Email 胁械褉懈褎懈褑懈褉芯胁邪薪! 孝械锌械褉褜 胁褘 屑芯卸械褌械 胁芯泄褌懈.', type: AppSnackbarType.success);
       context.goLogin();
     }
   }
@@ -60,7 +60,7 @@ class _VerificationScreenState extends ConsumerState<VerificationScreen> with Au
     final isLoading = ref.watch(authControllerProvider).isLoading;
 
     return AuthScaffold(
-      title: 'Верификация Email',
+      title: '袙械褉懈褎懈泻邪褑懈褟 Email',
       leading: IconButton(
         icon: Icon(Icons.arrow_back, color: c.textMuted),
         onPressed: () => context.pushRegister(),
@@ -73,14 +73,14 @@ class _VerificationScreenState extends ConsumerState<VerificationScreen> with Au
             Icon(Icons.verified_user, size: t.spacing.xxxl, color: c.primary),
             SizedBox(height: t.spacing.md),
             Text(
-              'Введите код, отправленный на ${widget.email}',
+              '袙胁械写懈褌械 泻芯写, 芯褌锌褉邪胁谢械薪薪褘泄 薪邪 ${widget.email}',
               style: t.typography.body.copyWith(color: c.textMuted),
               textAlign: TextAlign.center,
             ),
             SizedBox(height: t.spacing.sm),
             CodeField(
               controller: _code,
-              label: 'Код верификации',
+              label: '袣芯写 胁械褉懈褎懈泻邪褑懈懈',
               textInputAction: TextInputAction.done,
               exactLength: 6,
               onSubmitted: (_) => _submit(),
@@ -88,7 +88,7 @@ class _VerificationScreenState extends ConsumerState<VerificationScreen> with Au
             ),
             SizedBox(height: t.spacing.lg),
             SecondaryButton(
-              label: 'Подтвердить Email',
+              label: '袩芯写褌胁械褉写懈褌褜 Email',
               onPressed: isLoading ? null : _submit,
               icon: Icons.verified_rounded,
             ),

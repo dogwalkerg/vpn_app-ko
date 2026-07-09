@@ -1,4 +1,4 @@
-// lib/features/payments/widgets/payment_method_sheet.dart
+﻿// lib/features/payments/widgets/payment_method_sheet.dart
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:vpn_app/core/extensions/context_ext.dart';
@@ -74,11 +74,11 @@ class _PaymentMethodButton extends StatelessWidget {
     String label() {
       switch (method) {
         case PaymentMethod.bankCard:
-          return 'Картой';
+          return '袣邪褉褌芯泄';
         case PaymentMethod.sbp:
-          return 'СБП';
+          return '小袘袩';
         case PaymentMethod.sberpay:
-          return 'СберПэй';
+          return '小斜械褉袩褝泄';
       }
     }
 

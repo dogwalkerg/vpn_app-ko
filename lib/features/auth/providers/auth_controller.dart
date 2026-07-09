@@ -1,4 +1,4 @@
-// lib/features/auth/providers/auth_controller.dart
+﻿// lib/features/auth/providers/auth_controller.dart
 import 'dart:async';
 import 'package:dio/dio.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -96,7 +96,7 @@ class AuthController extends StateNotifier<AuthState> {
       await ref.read(subscriptionControllerProvider.notifier).fetch();
       unawaited(ref.read(deviceControllerProvider.notifier).touchLastSeen());
     } catch (_) {
-      // шум не нужен
+      // 褕褍屑 薪械 薪褍卸械薪
     }
   }
 
@@ -121,7 +121,7 @@ class AuthController extends StateNotifier<AuthState> {
     } on ApiException catch (e) {
       if (!ct.isCancelled) state = FeatureError<User>(e.message);
     } catch (_) {
-      if (!ct.isCancelled) state = const FeatureError<User>('Неизвестная ошибка');
+      if (!ct.isCancelled) state = const FeatureError<User>("未知错误");
     }
   }
 
@@ -203,5 +203,6 @@ class AuthController extends StateNotifier<AuthState> {
     }
   }
 }
+
 
 

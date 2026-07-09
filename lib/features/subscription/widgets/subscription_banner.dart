@@ -1,4 +1,4 @@
-// lib/features/subscription/widgets/subscription_banner.dart
+﻿// lib/features/subscription/widgets/subscription_banner.dart
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:vpn_app/core/extensions/context_ext.dart';
@@ -37,12 +37,12 @@ class SubscriptionBanner extends ConsumerWidget {
           Icon(Icons.warning_amber_rounded, color: c.danger, size: t.icons.lg),
           Expanded(
             child: Text(
-              'Доступ ограничен — требуется оплата подписки',
+              '袛芯褋褌褍锌 芯谐褉邪薪懈褔械薪 鈥?褌褉械斜褍械褌褋褟 芯锌谢邪褌邪 锌芯写锌懈褋泻懈',
               style: t.typography.body.copyWith(color: c.text, fontWeight: FontWeight.w600),
             ),
           ),
           PrimaryButton(
-            label: 'Оплатить',
+            label: '支付',
             onPressed: () => context.pushSubscription(),
             fullWidth: false,
             icon: Icons.diamond_rounded,
@@ -52,5 +52,6 @@ class SubscriptionBanner extends ConsumerWidget {
     );
   }
 }
+
 
 

@@ -38,17 +38,17 @@ class _DevicesScreenState extends ConsumerState<DevicesScreen> {
     final currentTokenAsync = ref.watch(currentDeviceTokenProvider);
 
     return ThemedScaffold(
-      appBar: const AppCustomAppBar(title: 'Устройства'),
+      appBar: const AppCustomAppBar(title: '校褋褌褉芯泄褋褌胁邪'),
       body: currentTokenAsync.when(
         loading: () => const Center(child: CircularProgressIndicator()),
-        error: (e, _) => Center(child: Text('Ошибка получения токена устройства: $e', style: t.typography.body.copyWith(color: c.danger))),
+        error: (e, _) => Center(child: Text('袨褕懈斜泻邪 锌芯谢褍褔械薪懈褟 褌芯泻械薪邪 褍褋褌褉芯泄褋褌胁邪: $e', style: t.typography.body.copyWith(color: c.danger))),
         data: (currentToken) {
           if (state is FeatureLoading) {
             return const Center(child: CircularProgressIndicator());
           }
           if (state is FeatureError<List<Device>>) {
             final message = state.message;
-            return Center(child: Text('Ошибка: $message', style: t.typography.body.copyWith(color: c.danger)));
+            return Center(child: Text('袨褕懈斜泻邪: $message', style: t.typography.body.copyWith(color: c.danger)));
           }
           final devices = (state is FeatureReady<List<Device>>) ? state.data : const <Device>[];
           return Padding(
@@ -62,7 +62,7 @@ class _DevicesScreenState extends ConsumerState<DevicesScreen> {
                       padding: t.spacing.all(t.spacing.md),
                       child: Center(
                         child: Text(
-                          'Подключено устройств: ${devices.length} из $maxDevices',
+                          '袩芯写泻谢褞褔械薪芯 褍褋褌褉芯泄褋褌胁: ${devices.length} 懈蟹 $maxDevices',
                           style: t.typography.h3.copyWith(color: c.text),
                         ),
                       ),
@@ -73,10 +73,10 @@ class _DevicesScreenState extends ConsumerState<DevicesScreen> {
                     child: RefreshIndicator(
                       onRefresh: () => ref.read(deviceControllerProvider.notifier).pullToRefresh(),
                       child: devices.isEmpty
-                          ? Center(child: Text('Нет устройств', style: t.typography.body.copyWith(color: c.textMuted)))
+                          ? Center(child: Text('袧械褌 褍褋褌褉芯泄褋褌胁', style: t.typography.body.copyWith(color: c.textMuted)))
                           : ListView.separated(
                               itemCount: devices.length,
-                              separatorBuilder: (context, index) => Divider(color: c.borderMuted),
+                              separatorBuilder: (_, _) => Divider(color: c.borderMuted),
                               itemBuilder: (context, i) {
                                 final d = devices[i];
                                 final isCurrent = d.token == currentToken;
@@ -85,16 +85,16 @@ class _DevicesScreenState extends ConsumerState<DevicesScreen> {
                                   leadingIcon: Icons.devices_other,
                                   leadingColor: c.primary,
                                   title: '${d.model} (${d.os})',
-                                  subtitle: 'Последний вход: ${d.lastSeenUtc.toLocalDate(pattern: "dd.MM.yyyy HH:mm")}',
+                                  subtitle: '袩芯褋谢械写薪懈泄 胁褏芯写: ${d.lastSeenUtc.toLocalDate(pattern: "yyyy-MM-dd HH:mm")}',
                                   trailing: isCurrent
-                                      ? Tooltip(message: 'Текущее устройство', child: Icon(Icons.lock, color: c.textMuted))
+                                      ? Tooltip(message: '孝械泻褍褖械械 褍褋褌褉芯泄褋褌胁芯', child: Icon(Icons.lock, color: c.textMuted))
                                       : IconButton(
                                           icon: Icon(Icons.delete, color: c.danger),
-                                          tooltip: 'Отключить',
+                                          tooltip: '袨褌泻谢褞褔懈褌褜',
                                           onPressed: () async {
                                             await ref.read(deviceControllerProvider.notifier).removeByToken(d.token);
                                             if (context.mounted) {
-                                              showAppSnackbar(context, text: 'Устройство отключено', type: AppSnackbarType.success);
+                                              showAppSnackbar(context, text: '校褋褌褉芯泄褋褌胁芯 芯褌泻谢褞褔械薪芯', type: AppSnackbarType.success);
                                             }
                                           },
                                         ),
@@ -112,5 +112,6 @@ class _DevicesScreenState extends ConsumerState<DevicesScreen> {
     );
   }
 }
+
 
 

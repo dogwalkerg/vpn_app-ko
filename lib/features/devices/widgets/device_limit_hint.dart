@@ -24,7 +24,7 @@ class DeviceLimitHint extends ConsumerWidget {
 
     return tokenAsync.when(
       loading: () => const SizedBox.shrink(),
-      error: (context, error) => const SizedBox.shrink(),
+      error: (_, _) => const SizedBox.shrink(),
       data: (currentToken) {
         if (devicesState is! FeatureReady<List<Device>>) return const SizedBox.shrink();
         final devices = devicesState.data;
@@ -47,7 +47,7 @@ class DeviceLimitHint extends ConsumerWidget {
               SizedBox(width: t.spacing.xs),
               Expanded(
                 child: Text(
-                  'Достигнут лимит устройств. Выйдите из аккаунта на одном из устройств, затем повторите вход здесь.',
+                  '已达设备数量上限。请在其他设备上退出登录，然后在此重新登录。',
                   style: t.typography.bodySm.copyWith(color: c.textMuted),
                 ),
               ),

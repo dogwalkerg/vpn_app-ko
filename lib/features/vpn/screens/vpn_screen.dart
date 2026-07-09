@@ -1,4 +1,4 @@
-// lib/features/vpn/screens/vpn_screen.dart
+﻿// lib/features/vpn/screens/vpn_screen.dart
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:vpn_app/core/extensions/context_ext.dart';
@@ -69,4 +69,5 @@ class VpnScreen extends ConsumerWidget {
     );
   }
 }
+
 
