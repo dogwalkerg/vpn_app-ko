@@ -1,4 +1,4 @@
-﻿// lib/core/errors/error_mapper.dart
+// lib/core/errors/error_mapper.dart
 import 'package:dio/dio.dart';
 import 'exceptions.dart';
 
@@ -12,7 +12,7 @@ Never throwFromResponse(Response res) {
     if (data['error'] is Map) {
       final err = data['error'] as Map;
       code = err['code']?.toString();
-      msg  = err['message']?.toString();
+      msg = err['message']?.toString();
     } else if (data['error'] != null) {
       msg = data['error'].toString();
     } else if (data['message'] != null) {
@@ -20,7 +20,7 @@ Never throwFromResponse(Response res) {
     }
   }
 
-  msg ??= '袨褕懈斜泻邪: $status';
+  msg ??= '错误: $status';
   if (status == 401) throw UnauthorizedException(msg);
   throw ApiException(msg, status, code);
 }
@@ -31,19 +31,18 @@ ApiException mapDioError(DioException e) {
     case DioExceptionType.receiveTimeout:
     case DioExceptionType.sendTimeout:
     case DioExceptionType.connectionError:
+    case DioExceptionType.transformTimeout:
       return const ApiException('网络连接问题，请检查网络设置。');
     case DioExceptionType.badCertificate:
       return const ApiException('连接证书验证失败。');
     case DioExceptionType.cancel:
-      return const ApiException("请求已被用户取消。");
+      return const ApiException('请求已被用户取消。');
     case DioExceptionType.badResponse:
       return ApiException(
-        e.message ?? "服务器响应错误",
+        e.message ?? '服务器响应错误',
         e.response?.statusCode,
       );
     case DioExceptionType.unknown:
-    return ApiException(e.message ?? "未知错误", e.response?.statusCode);
+      return ApiException(e.message ?? '未知错误', e.response?.statusCode);
   }
 }
-
-

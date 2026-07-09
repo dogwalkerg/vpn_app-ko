@@ -10,7 +10,7 @@ on:
       version:
         description: "Release version"
         required: false
-        default: "1.0.0"
+        default: "1.0.1"
 
 env:
   BASE_URL: "https://app.xsh.ccwu.cc"
@@ -42,7 +42,7 @@ jobs:
       with:
         name: app-release-apk
         path: build/app/outputs/flutter-apk/app-release.apk
-        if-no-files-found: warn
+        if-no-files-found: error
 
   build-ios:
     runs-on: macos-latest
@@ -53,10 +53,12 @@ jobs:
       with:
         channel: stable
         flutter-version: 3.44.x
+    - run: flutter create --platforms=ios,macos .
     - run: flutter pub get
     - run: flutter build ios --release --no-codesign --dart-define=BASE_URL=${{ env.BASE_URL }}
     - name: Package IPA (unsigned)
       run: |
+        rm -rf Payload app-release-unsigned.ipa
         mkdir -p Payload
         cp -r build/ios/iphoneos/Runner.app Payload/
         zip -r app-release-unsigned.ipa Payload/
@@ -64,7 +66,7 @@ jobs:
       with:
         name: app-release-ipa
         path: app-release-unsigned.ipa
-        if-no-files-found: warn
+        if-no-files-found: error
 
   build-windows:
     runs-on: windows-latest
@@ -82,7 +84,7 @@ jobs:
       with:
         name: app-release-windows
         path: build/windows/runner/Release/
-        if-no-files-found: warn
+        if-no-files-found: error
 
   build-macos:
     runs-on: macos-latest
@@ -93,6 +95,7 @@ jobs:
       with:
         channel: stable
         flutter-version: 3.44.x
+    - run: flutter create --platforms=ios,macos .
     - run: flutter pub get
     - run: flutter config --enable-macos-desktop
     - run: flutter build macos --release --dart-define=BASE_URL=${{ env.BASE_URL }}
@@ -100,7 +103,7 @@ jobs:
       with:
         name: app-release-macos
         path: build/macos/Build/Products/Release/
-        if-no-files-found: warn
+        if-no-files-found: error
 
   release:
     needs: [build-android, build-ios, build-windows, build-macos]
@@ -128,7 +131,7 @@ jobs:
       with:
         tag_name: v${{ github.event.inputs.version }}
         name: Release v${{ github.event.inputs.version }}
-        body: "Android APK + iOS IPA + Windows + macOS"
+        body: "Android APK + unsigned iOS IPA + Windows + macOS"
         files: artifacts/**/*
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

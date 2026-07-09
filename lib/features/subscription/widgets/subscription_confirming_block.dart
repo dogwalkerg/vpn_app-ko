@@ -1,4 +1,4 @@
-﻿// lib/features/subscription/widgets/subscription_confirming_block.dart
+// lib/features/subscription/widgets/subscription_confirming_block.dart
 import 'package:flutter/material.dart';
 import 'package:vpn_app/core/extensions/context_ext.dart';
 
@@ -31,14 +31,13 @@ class SubscriptionConfirmingBlock extends StatelessWidget {
           SizedBox(width: t.spacing.sm),
           Expanded(
             child: Text(
-              '袠写褢褌 锌芯写褌胁械褉卸写械薪懈械 芯锌谢邪褌褘鈥?,
+              '正在确认支付...',
               style: t.typography.body.copyWith(color: c.text, fontWeight: FontWeight.w600),
             ),
           ),
-          Text('写芯 2鈥? 屑懈薪', style: t.typography.caption.copyWith(color: c.textMuted)),
+          Text('最长 2 分钟', style: t.typography.caption.copyWith(color: c.textMuted)),
         ],
       ),
     );
   }
 }
-
