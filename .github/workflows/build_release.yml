@@ -10,7 +10,7 @@ on:
       version:
         description: "Release version"
         required: false
-        default: "1.0.1"
+        default: "1.0.2"
 
 env:
   BASE_URL: "https://app.xsh.ccwu.cc"
@@ -54,6 +54,25 @@ jobs:
         channel: stable
         flutter-version: 3.44.x
     - run: flutter create --platforms=ios,macos .
+    - name: Set Apple deployment targets
+      run: |
+        python3 - <<'PY'
+        from pathlib import Path
+        targets = [(Path('ios/Podfile'), 'ios', '15.0'), (Path('macos/Podfile'), 'osx', '12.0')]
+        for path, platform, version in targets:
+            text = path.read_text()
+            lines = text.splitlines()
+            replaced = False
+            for i, line in enumerate(lines):
+                stripped = line.strip()
+                if stripped.startswith(f'platform :{platform}') or stripped.startswith(f'# platform :{platform}'):
+                    lines[i] = f"platform :{platform}, '{version}'"
+                    replaced = True
+            if not replaced:
+                lines.insert(0, f"platform :{platform}, '{version}'")
+            path.write_text('\n'.join(lines) + '\n')
+        PY
+        grep -n "platform" ios/Podfile macos/Podfile
     - run: flutter pub get
     - run: flutter build ios --release --no-codesign --dart-define=BASE_URL=${{ env.BASE_URL }}
     - name: Package IPA (unsigned)
@@ -96,6 +115,25 @@ jobs:
         channel: stable
         flutter-version: 3.44.x
     - run: flutter create --platforms=ios,macos .
+    - name: Set Apple deployment targets
+      run: |
+        python3 - <<'PY'
+        from pathlib import Path
+        targets = [(Path('ios/Podfile'), 'ios', '15.0'), (Path('macos/Podfile'), 'osx', '12.0')]
+        for path, platform, version in targets:
+            text = path.read_text()
+            lines = text.splitlines()
+            replaced = False
+            for i, line in enumerate(lines):
+                stripped = line.strip()
+                if stripped.startswith(f'platform :{platform}') or stripped.startswith(f'# platform :{platform}'):
+                    lines[i] = f"platform :{platform}, '{version}'"
+                    replaced = True
+            if not replaced:
+                lines.insert(0, f"platform :{platform}, '{version}'")
+            path.write_text('\n'.join(lines) + '\n')
+        PY
+        grep -n "platform" ios/Podfile macos/Podfile
     - run: flutter pub get
     - run: flutter config --enable-macos-desktop
     - run: flutter build macos --release --dart-define=BASE_URL=${{ env.BASE_URL }}

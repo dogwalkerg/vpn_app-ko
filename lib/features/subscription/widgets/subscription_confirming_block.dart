@@ -31,11 +31,11 @@ class SubscriptionConfirmingBlock extends StatelessWidget {
           SizedBox(width: t.spacing.sm),
           Expanded(
             child: Text(
-              '正在确认支付...',
+              '\u6b63\u5728\u786e\u8ba4\u652f\u4ed8...',
               style: t.typography.body.copyWith(color: c.text, fontWeight: FontWeight.w600),
             ),
           ),
-          Text('最长 2 分钟', style: t.typography.caption.copyWith(color: c.textMuted)),
+          Text('\u6700\u957f 2 \u5206\u949f', style: t.typography.caption.copyWith(color: c.textMuted)),
         ],
       ),
     );
