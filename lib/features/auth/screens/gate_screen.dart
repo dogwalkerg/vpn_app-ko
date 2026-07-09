@@ -20,7 +20,7 @@ class GateScreen extends StatelessWidget {
             SizedBox(height: t.spacing.sm),
             CircularProgressIndicator(color: c.primary),
             SizedBox(height: t.spacing.xs),
-            Text('袩褉芯胁械褉褟械屑 褋械褋褋懈褞...', style: t.typography.body.copyWith(color: c.textMuted)),
+            Text('正在检查登录状态...', style: t.typography.body.copyWith(color: c.textMuted)),
           ],
         ),
       ),

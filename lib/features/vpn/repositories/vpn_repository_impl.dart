@@ -46,7 +46,7 @@ class VpnRepositoryImpl implements VpnRepository {
   @override
   Future<VpnConfig> fetchConfig({CancelToken? cancelToken}) async {
     try {
-      final res = await _api.get('/vpn/get-vpn-config', cancelToken: cancelToken);
+      final res = await _api.get('/tunnel/get-config', cancelToken: cancelToken);
       final code = res.statusCode ?? 0;
       if (code < 200 || code >= 300) throwFromResponse(res);
       final map = (res.data as Map).cast<String, dynamic>();
@@ -62,7 +62,7 @@ class VpnRepositoryImpl implements VpnRepository {
     await _ensureInitialized();
 
     final ok = await ensureVpnPermission();
-    if (!ok) throw Exception('VPN permission denied');
+    if (!ok) throw Exception('未获得 VPN 权限');
 
     final cfg = await fetchConfig();
     await validateConfigIsolate(cfg);
@@ -113,7 +113,7 @@ class VpnRepositoryImpl implements VpnRepository {
       }
     }
 
-    throw lastErr ?? Exception('Unknown VPN error');
+    throw lastErr ?? Exception('未知 VPN 错误');
   }
 
   @override

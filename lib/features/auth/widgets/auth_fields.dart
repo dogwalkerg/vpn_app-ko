@@ -91,11 +91,11 @@ class _PasswordFieldState extends State<PasswordField> {
 class CodeField extends StatelessWidget {
   final TextEditingController controller;
   final String label;
-  final int? exactLength;                 // 械褋谢懈 蟹薪邪械屑 褌芯褔薪褍褞 写谢懈薪褍 (薪邪锌褉., 6)
-  final int minLength;                    // 懈薪邪褔械 懈褋锌芯谢褜蟹褍械屑 屑懈薪懈屑褍屑
+  final int? exactLength;
+  final int minLength;
   final TextInputAction textInputAction;
   final ValueChanged<String>? onSubmitted;
-  final VoidCallback? onCompleted;        // 胁褘蟹芯胁 锌褉懈 薪邪斜芯褉械 exactLength
+  final VoidCallback? onCompleted;
   final FocusNode? focusNode;
 
   const CodeField({

@@ -41,7 +41,6 @@ class AppDrawer extends ConsumerWidget {
                         decoration: BoxDecoration(color: c.primary, shape: BoxShape.circle),
                         child: Padding(
                           padding: EdgeInsets.all(t.spacing.xs),
-                          // 48 -> 懈褋锌芯谢褜蟹褍械屑 褌芯泻械薪 spacing.xxl 泻邪泻 褉邪蟹屑械褉 懈泻芯薪泻懈
                           child: Icon(Icons.account_circle, size: t.spacing.xxl, color: c.text),
                         ),
                       ),
@@ -49,7 +48,7 @@ class AppDrawer extends ConsumerWidget {
                   ),
                 ),
                 SizedBox(height: t.spacing.sm),
-                Text(username ?? '袚芯褋褌褜', style: t.typography.h2.copyWith(color: c.text)),
+                Text(username ?? '访客', style: t.typography.h2.copyWith(color: c.text)),
               ],
             ),
           ),
@@ -57,7 +56,7 @@ class AppDrawer extends ConsumerWidget {
           ListTileX(
             leadingIcon: Icons.diamond_rounded,
             leadingColor: c.primary,
-            title: '袩芯写锌懈褋泻邪',
+            title: '订阅套餐',
             onTap: () {
               context.pop();
               rootCtx.pushSubscription();
@@ -66,7 +65,7 @@ class AppDrawer extends ConsumerWidget {
           ListTileX(
             leadingIcon: Icons.devices,
             leadingColor: c.info,
-            title: '校褋褌褉芯泄褋褌胁邪',
+            title: '设备管理',
             onTap: () {
               context.pop();
               rootCtx.pushDevices();
@@ -75,7 +74,7 @@ class AppDrawer extends ConsumerWidget {
           ListTileX(
             leadingIcon: Icons.info_outline,
             leadingColor: c.secondary,
-            title: '袨 锌褉懈谢芯卸械薪懈懈',
+            title: '关于应用',
             onTap: () {
               context.pop();
               rootCtx.pushAbout();
@@ -85,13 +84,13 @@ class AppDrawer extends ConsumerWidget {
           ListTileX(
             leadingIcon: Icons.brightness_6,
             leadingColor: c.highlight,
-            title: '小屑械薪懈褌褜 褌械屑褍',
+            title: '切换主题',
             onTap: () {
               ref.read(themeProvider).toggleTheme();
               final newMode = ref.read(themeProvider).themeMode;
               showAppSnackbar(
                 context,
-                text: '孝械屑邪 懈蟹屑械薪械薪邪 薪邪 ${newMode == ThemeMode.dark ? '深色' : '浅色'}',
+                text: '主题已切换为${newMode == ThemeMode.dark ? '深色' : '浅色'}模式',
                 type: AppSnackbarType.info,
               );
             },
@@ -101,7 +100,7 @@ class AppDrawer extends ConsumerWidget {
             ListTileX(
               leadingIcon: Icons.logout,
               leadingColor: c.danger,
-              title: '袙褘泄褌懈',
+              title: '退出登录',
               onTap: () async {
                 rootCtxOrNull?.pop();
                 ref.read(authControllerProvider.notifier).logout();

@@ -96,7 +96,7 @@ class AuthController extends StateNotifier<AuthState> {
       await ref.read(subscriptionControllerProvider.notifier).fetch();
       unawaited(ref.read(deviceControllerProvider.notifier).touchLastSeen());
     } catch (_) {
-      // 褕褍屑 薪械 薪褍卸械薪
+      // 静默忽略登出异常。
     }
   }
 

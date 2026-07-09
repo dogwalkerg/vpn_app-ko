@@ -43,7 +43,7 @@ class PaymentWebViewScreen extends StatelessWidget {
 
     return ThemedScaffold(
       appBar: AppCustomAppBar(
-        title: '袨锌谢邪褌邪',
+        title: '支付',
         leading: IconButton(
           icon: Icon(Icons.close, color: c.textMuted),
           onPressed: () {

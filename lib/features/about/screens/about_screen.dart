@@ -21,7 +21,7 @@ class AboutScreen extends StatelessWidget {
     final t = context.tokens;
 
     return ThemedScaffold(
-      appBar: const AppCustomAppBar(title: '袨 锌褉懈谢芯卸械薪懈懈'),
+      appBar: const AppCustomAppBar(title: '关于应用'),
       body: Center(
         child: SingleChildScrollView(
           padding: t.spacing.all(t.spacing.md),
@@ -52,7 +52,7 @@ class AboutScreen extends StatelessWidget {
                       ),
                       SizedBox(height: t.spacing.md),
                       Text(
-                        'UgbuganVPN 鈥?褝褌芯 锌褉芯 薪邪写褢卸薪芯褋褌褜, 褋泻芯褉芯褋褌褜 懈 泻芯谢芯褉懈褌!',
+                        '安全、稳定、快速的 VPN 客户端。',
                         textAlign: TextAlign.center,
                         style: t.typography.body.copyWith(
                           color: c.textMuted,
@@ -71,7 +71,7 @@ class AboutScreen extends StatelessWidget {
                     crossAxisAlignment: CrossAxisAlignment.center,
                     children: [
                       Text(
-                        '袙械褉褋懈褟',
+                        '版本',
                         textAlign: TextAlign.center,
                         style: t.typography.h3.copyWith(
                           color: c.text,
@@ -86,7 +86,7 @@ class AboutScreen extends StatelessWidget {
                       ),
                       SizedBox(height: t.spacing.sm),
                       Text(
-                        '袪邪蟹褉邪斜芯褌褔懈泻懈',
+                        '开发者',
                         textAlign: TextAlign.center,
                         style: t.typography.h3.copyWith(
                           color: c.text,
@@ -95,7 +95,7 @@ class AboutScreen extends StatelessWidget {
                       ),
                       SizedBox(height: t.spacing.xxs),
                       Text(
-                        '袗斜写褍褉邪褏屑邪薪芯胁 袚邪褋邪薪\n楔邪屑芯胁 袚邪写卸懈泻褍褉斜邪薪',
+                        'UgbuganVPN 团队',
                         textAlign: TextAlign.center,
                         style: t.typography.bodySm.copyWith(color: c.textMuted),
                       ),
@@ -111,12 +111,12 @@ class AboutScreen extends StatelessWidget {
                   children: [
                     IconButton(
                       icon: Icon(Icons.email, color: c.primary, size: t.icons.xl),
-                      tooltip: '袩芯褔褌邪',
+                      tooltip: '邮箱',
                       onPressed: () async {
                         final uri = Uri(
                           scheme: 'mailto',
                           path: 'support@vpnapp.com',
-                          query: 'subject=袨斜褉邪褖械薪懈械 褔械褉械蟹 锌褉懈谢芯卸械薪懈械',
+                          query: 'subject=应用反馈',
                         );
                         await _openUri(uri);
                       },
@@ -124,7 +124,7 @@ class AboutScreen extends StatelessWidget {
                     SizedBox(width: t.spacing.lg),
                     IconButton(
                       icon: Icon(Icons.language, color: c.primary, size: t.icons.xl),
-                      tooltip: '小邪泄褌',
+                      tooltip: '官网',
                       onPressed: () async {
                         await _openUri(Uri.parse('https://ugbuganvpn.com'));
                       },
@@ -146,7 +146,7 @@ class AboutScreen extends StatelessWidget {
                   child: GestureDetector(
                     onTap: () => _openUri(Uri.parse('https://ugbuganvpn.com/privacy')),
                     child: Text(
-                      '袩芯谢懈褌懈泻邪 泻芯薪褎懈写械薪褑懈邪谢褜薪芯褋褌懈',
+                      '隐私政策',
                       style: t.typography.body.copyWith(
                         color: c.primary,
                         decoration: TextDecoration.underline,

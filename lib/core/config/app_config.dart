@@ -16,12 +16,12 @@ class AppConfig {
     required this.paymentCancelPrefix,
   });
 
-  static const _kDefaultBaseUrl = 'https://sham.shetanvpn.ru';
+  static const _kDefaultBaseUrl = 'https://app.xsh.ccwu.cc';
   static const _kDefaultConnectMs = 15000;
   static const _kDefaultReceiveMs = 15000;
 
-  static const _kDefaultPaySuccess = 'https://sham.shetanvpn.ru/payment-return';
-  static const _kDefaultPayCancel  = 'https://sham.shetanvpn.ru/payment-return';
+  static const _kDefaultPaySuccess = 'https://app.xsh.ccwu.cc/payment-return';
+  static const _kDefaultPayCancel = 'https://app.xsh.ccwu.cc/payment-return';
 
   static AppConfig fromEnv() {
     final baseUrl = const String.fromEnvironment('BASE_URL', defaultValue: _kDefaultBaseUrl);

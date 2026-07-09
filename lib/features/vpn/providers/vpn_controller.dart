@@ -106,14 +106,14 @@ class VpnController extends StateNotifier<VpnState> {
   Future<void> connectPressed() async {
     if (state is VpnConnecting || state is VpnDisconnecting) return;
     if (!_canUseVpn) {
-      state = const VpnError('Подписка не активна');
+      state = const VpnError('订阅未激活，请先开通套餐');
       return;
     }
     state = const VpnConnecting();
     _connectTimeout?.cancel();
     _connectTimeout = Timer(const Duration(seconds: 20), () {
       if (mounted && state is VpnConnecting) {
-        state = const VpnError('Не удалось подключиться: таймаут');
+        state = const VpnError('连接超时，请检查节点或网络');
       }
     });
     try {

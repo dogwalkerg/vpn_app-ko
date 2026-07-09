@@ -53,13 +53,14 @@ class PaymentController extends StateNotifier<PaymentState> {
   Future<void> startPayment({
     required PaymentMethod method,
     double amount = 1.0,
+    int? planId,
   }) async {
     _cancel();
     state = const PaymentLoading();
     final ct = _replaceToken();
     try {
       final created =
-          await createPayment(amount: amount, method: method, cancelToken: ct);
+          await createPayment(amount: amount, method: method, planId: planId, cancelToken: ct);
       state = PaymentReady(created);
 
       _sub = pollStatus(created.id, cancelToken: ct).listen((st) {

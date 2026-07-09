@@ -47,7 +47,7 @@ class _VerificationScreenState extends ConsumerState<VerificationScreen> with Au
     if (err != null) {
       showAppSnackbar(context, text: err, type: AppSnackbarType.error);
     } else {
-      showAppSnackbar(context, text: 'Email 胁械褉懈褎懈褑懈褉芯胁邪薪! 孝械锌械褉褜 胁褘 屑芯卸械褌械 胁芯泄褌懈.', type: AppSnackbarType.success);
+      showAppSnackbar(context, text: '邮箱验证成功，现在可以登录。', type: AppSnackbarType.success);
       context.goLogin();
     }
   }
@@ -60,7 +60,7 @@ class _VerificationScreenState extends ConsumerState<VerificationScreen> with Au
     final isLoading = ref.watch(authControllerProvider).isLoading;
 
     return AuthScaffold(
-      title: '袙械褉懈褎懈泻邪褑懈褟 Email',
+      title: '邮箱验证',
       leading: IconButton(
         icon: Icon(Icons.arrow_back, color: c.textMuted),
         onPressed: () => context.pushRegister(),
@@ -73,14 +73,14 @@ class _VerificationScreenState extends ConsumerState<VerificationScreen> with Au
             Icon(Icons.verified_user, size: t.spacing.xxxl, color: c.primary),
             SizedBox(height: t.spacing.md),
             Text(
-              '袙胁械写懈褌械 泻芯写, 芯褌锌褉邪胁谢械薪薪褘泄 薪邪 ${widget.email}',
+              '请输入发送到 ${widget.email} 的验证码',
               style: t.typography.body.copyWith(color: c.textMuted),
               textAlign: TextAlign.center,
             ),
             SizedBox(height: t.spacing.sm),
             CodeField(
               controller: _code,
-              label: '袣芯写 胁械褉懈褎懈泻邪褑懈懈',
+              label: '验证码',
               textInputAction: TextInputAction.done,
               exactLength: 6,
               onSubmitted: (_) => _submit(),
@@ -88,7 +88,7 @@ class _VerificationScreenState extends ConsumerState<VerificationScreen> with Au
             ),
             SizedBox(height: t.spacing.lg),
             SecondaryButton(
-              label: '袩芯写褌胁械褉写懈褌褜 Email',
+              label: '验证邮箱',
               onPressed: isLoading ? null : _submit,
               icon: Icons.verified_rounded,
             ),

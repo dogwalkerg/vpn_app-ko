@@ -69,7 +69,7 @@ class _RegisterScreenState extends ConsumerState<RegisterScreen> with AutomaticK
     final isLoading = ref.watch(authControllerProvider).isLoading;
 
     return AuthScaffold(
-      title: '袪械谐懈褋褌褉邪褑懈褟',
+      title: '注册',
       leading: IconButton(
         icon: Icon(Icons.arrow_back, color: c.textMuted),
         onPressed: () => context.pop(),
@@ -87,13 +87,13 @@ class _RegisterScreenState extends ConsumerState<RegisterScreen> with AutomaticK
             PasswordField(controller: _password, focusNode: _pwdNode),
             SizedBox(height: t.spacing.lg + t.spacing.xs),
             SecondaryButton(
-              label: '袟邪褉械谐懈褋褌褉懈褉芯胁邪褌褜褋褟',
+              label: '注册账号',
               onPressed: isLoading ? null : _submit,
               icon: isLoading ? null : Icons.person_add,
             ),
             SizedBox(height: t.spacing.md),
             GhostButton(
-              label: '校卸械 械褋褌褜 邪泻泻邪褍薪褌? 袙芯泄褌懈',
+              label: '已有账号？去登录',
               onPressed: () => context.pop(),
             ),
           ],

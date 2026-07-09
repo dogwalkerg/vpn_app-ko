@@ -27,13 +27,18 @@ class PaymentsRepositoryImpl implements PaymentsRepository {
   Future<Payment> create({
     required double amount,
     required PaymentMethod method,
+    int? planId,
     CancelToken? cancelToken,
   }) async {
     try {
       final idempotencyKey = _genIdempotencyKey();
       final res = await api.post(
         _createPath,
-        data: {'amount': amount, 'method': method.serverValue},
+        data: {
+          'amount': amount,
+          'method': method.serverValue,
+          if (planId != null) 'plan_id': planId,
+        },
         options: Options(extra: {'idempotencyKey': idempotencyKey}),
         cancelToken: cancelToken,
       );
@@ -93,7 +98,7 @@ class PaymentsRepositoryImpl implements PaymentsRepository {
           ? (res.data as Map).cast<String, dynamic>()
           : <String, dynamic>{};
       final raw = data['status'] as String?;
-      if (raw == null) throw const FormatException('Статус не получен');
+      if (raw == null) throw const FormatException('未获取到支付状态');
       return parsePaymentStatus(raw);
     } on DioException catch (e) {
       throw mapDioError(e);

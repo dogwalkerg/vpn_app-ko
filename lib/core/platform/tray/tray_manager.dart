@@ -35,20 +35,20 @@ class TrayManagerHandler with tray.TrayListener {
     final bool isConnecting = vpnState is VpnConnecting || vpnState is VpnDisconnecting;
     final menu = tray.Menu(
       items: [
-        tray.MenuItem(key: 'show_window', label: 'Show Window'),
+        tray.MenuItem(key: 'show_window', label: '显示窗口'),
         tray.MenuItem.separator(),
         tray.MenuItem(
           key: 'connect',
-          label: 'Connect',
+          label: '连接',
           disabled: !isLoggedIn || isConnected || isConnecting,
         ),
         tray.MenuItem(
           key: 'disconnect',
-          label: 'Disconnect',
+          label: '断开连接',
           disabled: !isLoggedIn || !isConnected,
         ),
         tray.MenuItem.separator(),
-        tray.MenuItem(key: 'exit', label: 'Exit App'),
+        tray.MenuItem(key: 'exit', label: '退出应用'),
       ],
     );
     await tray.TrayManager.instance.setContextMenu(menu);
@@ -89,21 +89,21 @@ class TrayManagerHandler with tray.TrayListener {
         try {
           await vpn.connectPressed();
         } catch (e) {
-          logger.e('Tray connect error: $e');
+          logger.e('托盘连接失败: $e');
         }
         break;
       case 'disconnect':
         try {
           await vpn.disconnectPressed();
         } catch (e) {
-          logger.e('Tray disconnect error: $e');
+          logger.e('托盘断开失败: $e');
         }
         break;
       case 'exit':
         try {
           await vpn.disconnectPressed();
         } catch (e) {
-          logger.e('Disconnect error: $e');
+          logger.e('断开连接失败: $e');
         }
         tray.TrayManager.instance.destroy();
         windowManager.destroy();

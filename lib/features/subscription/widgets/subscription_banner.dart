@@ -37,7 +37,7 @@ class SubscriptionBanner extends ConsumerWidget {
           Icon(Icons.warning_amber_rounded, color: c.danger, size: t.icons.lg),
           Expanded(
             child: Text(
-              '袛芯褋褌褍锌 芯谐褉邪薪懈褔械薪 鈥?褌褉械斜褍械褌褋褟 芯锌谢邪褌邪 锌芯写锌懈褋泻懈',
+              '访问受限，请先开通订阅套餐',
               style: t.typography.body.copyWith(color: c.text, fontWeight: FontWeight.w600),
             ),
           ),

@@ -75,7 +75,7 @@ class DeviceId {
   static Future<(String model, String osName)> _getPlatformModelAndOs() async {
     if (kIsWeb) return ('Web', 'Web');
 
-    String model = 'Unknown';
+    String model = '未知设备';
     String osName = Platform.operatingSystem; // android/ios/windows/macos/linux
 
     try {
@@ -116,7 +116,7 @@ class DeviceId {
       case 'windows': return 'Windows';
       case 'macos':   return 'macOS';
       case 'linux':   return 'Linux';
-      default:        return 'Unknown';
+      default:        return '未知系统';
     }
   }
 }

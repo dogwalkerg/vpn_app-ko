@@ -58,7 +58,7 @@ Future<void> _submit() async {
     final isLoading = ref.watch(authControllerProvider).isLoading;
 
     return AuthScaffold(
-      title: '袙褏芯写',
+      title: '登录',
       canPop: false,
       body: Form(
         key: _formKey,
@@ -79,7 +79,7 @@ Future<void> _submit() async {
             ),
             SizedBox(height: t.spacing.xs),
             GhostButton(
-              label: '袟邪斜褘谢懈 锌邪褉芯谢褜?',
+              label: '忘记密码？',
               onPressed: () {
                 final u = _username.text.trim();
                 if (u.isEmpty) {
@@ -99,12 +99,12 @@ Future<void> _submit() async {
               ),
             SizedBox(height: t.spacing.sm),
             PrimaryButton(
-              label: '袙芯泄褌懈',
+              label: '登录',
               onPressed: isLoading ? null : _submit,
             ),
             SizedBox(height: t.spacing.sm),
             GhostButton(
-              label: '袟邪褉械谐懈褋褌褉懈褉芯胁邪褌褜褋褟',
+              label: '注册账号',
               onPressed: () => context.pushRegister(),
             ),
           ],

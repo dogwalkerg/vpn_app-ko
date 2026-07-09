@@ -51,7 +51,7 @@ class DeviceRepositoryImpl implements DeviceRepository {
     if (status < 200 || status >= 300) throwFromResponse(res);
     final data = res.data;
     if (data is! List) {
-      throw Exception('Некорректный формат ответа');
+      throw Exception('设备列表响应格式不正确');
     }
     return _fromListJson(data);
   }
@@ -130,4 +130,3 @@ class DeviceRepositoryImpl implements DeviceRepository {
     _devicesEntry.touch();
   }
 }
-

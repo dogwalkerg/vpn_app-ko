@@ -48,7 +48,7 @@ class _ResetPasswordScreenState extends ConsumerState<ResetPasswordScreen> {
     if (err != null) {
       showAppSnackbar(context, text: err, type: AppSnackbarType.error);
     } else {
-      showAppSnackbar(context, text: '袩邪褉芯谢褜 褍褋锌械褕薪芯 褋斜褉芯褕械薪', type: AppSnackbarType.success);
+      showAppSnackbar(context, text: '密码已重置', type: AppSnackbarType.success);
       context.goLogin();
     }
   }
@@ -60,7 +60,7 @@ class _ResetPasswordScreenState extends ConsumerState<ResetPasswordScreen> {
     final isLoading = ref.watch(authControllerProvider).isLoading;
 
     return AuthScaffold(
-      title: '小斜褉芯褋 锌邪褉芯谢褟',
+      title: '重置密码',
       leading: IconButton(
         icon: Icon(Icons.arrow_back, color: c.textMuted),
         onPressed: () => context.pop(),
@@ -73,7 +73,7 @@ class _ResetPasswordScreenState extends ConsumerState<ResetPasswordScreen> {
             SizedBox(height: t.spacing.lg + t.spacing.xs),
             CodeField(
               controller: _code,
-              label: '袣芯写 胁芯褋褋褌邪薪芯胁谢械薪懈褟',
+              label: '重置验证码',
               textInputAction: TextInputAction.next,
               exactLength: 6,
               onSubmitted: (_) => _pwdNode.requestFocus(),
@@ -82,11 +82,11 @@ class _ResetPasswordScreenState extends ConsumerState<ResetPasswordScreen> {
             PasswordField(
               controller: _newPassword,
               focusNode: _pwdNode,
-              label: '袧芯胁褘泄 锌邪褉芯谢褜',
+              label: '新密码',
             ),
             SizedBox(height: t.spacing.lg + t.spacing.xs),
             SecondaryButton(
-              label: '小斜褉芯褋懈褌褜 锌邪褉芯谢褜',
+              label: '重置密码',
               onPressed: isLoading ? null : _submit,
               icon: Icons.check_rounded,
             ),

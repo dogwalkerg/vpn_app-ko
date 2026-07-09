@@ -5,7 +5,12 @@ import 'package:vpn_app/core/extensions/context_ext.dart';
 import 'package:vpn_app/features/payments/providers/payment_providers.dart';
 import 'package:vpn_app/features/payments/models/domain/payment_method.dart';
 
-void showPaymentMethodSheet(BuildContext context, WidgetRef ref) {
+void showPaymentMethodSheet(
+  BuildContext context,
+  WidgetRef ref, {
+  double amount = 1.0,
+  int? planId,
+}) {
   final c = context.colors;
   final t = context.tokens;
   final ctrl = ref.read(paymentControllerProvider.notifier);
@@ -40,7 +45,7 @@ void showPaymentMethodSheet(BuildContext context, WidgetRef ref) {
             method: m,
             onTap: () {
               Navigator.of(ctx).pop();
-              ctrl.startPayment(method: m);
+              ctrl.startPayment(method: m, amount: amount, planId: planId);
             },
           ),
         SizedBox(height: t.spacing.md),
@@ -74,11 +79,11 @@ class _PaymentMethodButton extends StatelessWidget {
     String label() {
       switch (method) {
         case PaymentMethod.bankCard:
-          return '袣邪褉褌芯泄';
+          return '银行卡';
         case PaymentMethod.sbp:
-          return '小袘袩';
+          return '钱包支付';
         case PaymentMethod.sberpay:
-          return '小斜械褉袩褝泄';
+          return '网银支付';
       }
     }
 

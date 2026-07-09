@@ -20,7 +20,7 @@ class PaymentInitDto {
     final pid = map['paymentId'] as String?;
     final url = map['confirmationUrl'] as String?;
     if (pid == null || url == null) {
-      throw const FormatException('Invalid Payment init json');
+      throw const FormatException('支付初始化数据无效');
     }
     final rawMethod = map['method'] as String?;
     final amount = (map['amount'] as num?)?.toDouble();

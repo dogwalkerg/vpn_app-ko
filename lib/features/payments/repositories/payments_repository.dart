@@ -8,6 +8,7 @@ abstract class PaymentsRepository {
   Future<Payment> create({
     required double amount,
     required PaymentMethod method,
+    int? planId,
     CancelToken? cancelToken,
   });
 

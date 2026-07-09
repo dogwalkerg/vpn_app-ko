@@ -22,8 +22,8 @@ class DeviceDto {
     return DeviceDto(
       id: id,
       deviceToken: (json['device_token'] ?? '').toString(),
-      deviceModel: (json['device_model'] ?? 'Unknown Model').toString(),
-      deviceOS: (json['device_os'] ?? 'Unknown OS').toString(),
+      deviceModel: (json['device_model'] ?? '未知设备').toString(),
+      deviceOS: (json['device_os'] ?? '未知系统').toString(),
       lastSeen: json['last_seen']?.toString(),
     );
   }
