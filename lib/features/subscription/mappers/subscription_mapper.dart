@@ -13,5 +13,6 @@ SubscriptionStatus subscriptionStatusFromMap(Map<String, dynamic> json) {
     deviceCount: (json['device_count'] ?? json['deviceCount'] ?? 0) as int,
     maxDevices: (json['max_devices'] ?? json['maxDevices'] ?? 3) as int,
     balance: ((json['balance'] ?? 0) as num).toDouble(),
+    subUrl: str(json['sub_url'] ?? json['subUrl']) ?? '',
   );
 }

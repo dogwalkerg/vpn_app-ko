@@ -8,6 +8,7 @@ class SubscriptionStatus {
   final int deviceCount;
   final int maxDevices;
   final double balance;
+  final String subUrl;
 
   const SubscriptionStatus({
     required this.isTrial,
@@ -18,6 +19,7 @@ class SubscriptionStatus {
     required this.deviceCount,
     required this.maxDevices,
     this.balance = 0,
+    this.subUrl = '',
   });
 
   factory SubscriptionStatus.fromJson(Map<String, dynamic> json) {
@@ -32,6 +34,7 @@ class SubscriptionStatus {
       deviceCount: (json['device_count'] ?? json['deviceCount'] ?? 0) as int,
       maxDevices: (json['max_devices'] ?? json['maxDevices'] ?? 3) as int,
       balance: ((json['balance'] ?? 0) as num).toDouble(),
+      subUrl: str(json['sub_url'] ?? json['subUrl']) ?? '',
     );
   }
 }
