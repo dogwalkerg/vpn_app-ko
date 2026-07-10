@@ -1,9 +1,11 @@
-﻿plugins {
+plugins {
     id("com.android.application")
     id("kotlin-android")
     // The Flutter Gradle Plugin must be applied after the Android and Kotlin Gradle plugins.
     id("dev.flutter.flutter-gradle-plugin")
 }
+
+val releaseKeystore = file("../keystore/my-release-key.jks")
 
 android {
     namespace = "com.example.vpn_app"
@@ -31,11 +33,13 @@ android {
     }
 
     signingConfigs {
-        create("release") {
-            storeFile = file("../keystore/my-release-key.jks") // Путь к вашему .jks файлу
-            storePassword = "33772744" // Пароль, который вы задали
-            keyAlias = "my-key-alias" // Псевдоним ключа
-            keyPassword = "33772744" // Пароль ключа
+        if (releaseKeystore.exists()) {
+            create("release") {
+                storeFile = releaseKeystore
+                storePassword = "33772744"
+                keyAlias = "my-key-alias"
+                keyPassword = "33772744"
+            }
         }
     }
 
@@ -43,7 +47,13 @@ android {
         release {
             // TODO: Add your own signing config for the release build.
             // Signing with the debug keys for now, so `flutter run --release` works.
-            signingConfig = signingConfigs.getByName("release")
+            // CI does not contain the private release keystore. Fall back to the
+            // standard debug key so release-mode compilation remains verifiable.
+            signingConfig = if (releaseKeystore.exists()) {
+                signingConfigs.getByName("release")
+            } else {
+                signingConfigs.getByName("debug")
+            }
             isMinifyEnabled = false
             isShrinkResources = false
         }
