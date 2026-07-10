@@ -1,4 +1,4 @@
-﻿name: Flutter CI
+name: Flutter CI
 
 on:
   workflow_dispatch:
@@ -55,7 +55,15 @@ jobs:
         python3 - <<'PY'
         from pathlib import Path
         podfile = Path('ios/Podfile')
-        lines = podfile.read_text().splitlines()
+        text = podfile.read_text()
+        sources = [
+            "source 'https://github.com/CocoaPods/Specs.git'",
+            "source 'https://git.yoomoney.ru/scm/sdk/cocoa-pod-specs.git'",
+        ]
+        for source in reversed(sources):
+            if source not in text:
+                text = source + '\n' + text
+        lines = text.splitlines()
         out = []
         done = False
         for line in lines:
@@ -77,8 +85,9 @@ jobs:
         grep -n "platform" ios/Podfile
         grep -n "IPHONEOS_DEPLOYMENT_TARGET" ios/Runner.xcodeproj/project.pbxproj || true
     - run: flutter pub get
-    - name: Update CocoaPods specs
-      run: pod repo update
+    - name: Install iOS pods
+      working-directory: ios
+      run: pod install --repo-update
     - run: flutter build ios --release --no-codesign --dart-define=BASE_URL=${{ env.BASE_URL }}
     - name: Package IPA (unsigned)
       run: |
@@ -127,6 +136,7 @@ jobs:
       run: |
         python3 - <<'PY'
         from pathlib import Path
+        import re
         podfile = Path('macos/Podfile')
         lines = podfile.read_text().splitlines()
         out = []
@@ -143,8 +153,7 @@ jobs:
             out.insert(0, "platform :osx, '12.0'")
         podfile.write_text('\n'.join(out) + '\n')
         pbx = Path('macos/Runner.xcodeproj/project.pbxproj')
-        text = pbx.read_text().replace('MACOSX_DEPLOYMENT_TARGET = 10.15;', 'MACOSX_DEPLOYMENT_TARGET = 12.0;')
-        text = text.replace('MACOSX_DEPLOYMENT_TARGET = 11.0;', 'MACOSX_DEPLOYMENT_TARGET = 12.0;')
+        text = re.sub(r'MACOSX_DEPLOYMENT_TARGET = [0-9.]+;', 'MACOSX_DEPLOYMENT_TARGET = 12.0;', pbx.read_text())
         pbx.write_text(text)
         PY
         grep -n "platform" macos/Podfile
