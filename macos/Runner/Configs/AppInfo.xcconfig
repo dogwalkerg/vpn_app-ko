@@ -10,5 +10,8 @@ PRODUCT_NAME = vpn_app
 // The application's bundle identifier
 PRODUCT_BUNDLE_IDENTIFIER = com.example.vpnApp
 
+// Native dependencies require macOS 12 or newer.
+MACOSX_DEPLOYMENT_TARGET = 12.0
+
 // The copyright displayed in application information
 PRODUCT_COPYRIGHT = Copyright © 2025 com.example. All rights reserved.
