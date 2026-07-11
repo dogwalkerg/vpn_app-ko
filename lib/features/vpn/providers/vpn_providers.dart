@@ -11,5 +11,9 @@ final vpnRepositoryProvider = Provider<VpnRepository>((ref) {
   return VpnRepositoryImpl(
     ref.read(apiServiceProvider),
     selectedNode: () => ref.read(selectedSubscriptionNodeProvider),
+    availableNodes: () =>
+        ref.read(subscriptionNodesProvider).valueOrNull ?? const [],
+    onNodeSelected: (node) =>
+        ref.read(selectedSubscriptionNodeProvider.notifier).state = node,
   );
 }, name: 'vpnRepository');

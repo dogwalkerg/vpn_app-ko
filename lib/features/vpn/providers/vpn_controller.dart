@@ -125,7 +125,7 @@ class VpnController extends StateNotifier<VpnState> {
     }
     state = const VpnConnecting();
     _connectTimeout?.cancel();
-    _connectTimeout = Timer(const Duration(seconds: 20), () {
+    _connectTimeout = Timer(const Duration(seconds: 90), () {
       if (mounted && state is VpnConnecting) {
         state = const VpnError('连接超时，请检查节点或网络');
       }
@@ -133,7 +133,7 @@ class VpnController extends StateNotifier<VpnState> {
     try {
       await connect();
       _connectTimeout?.cancel();
-      state = const VpnConnected();
+      if (state is VpnConnecting) state = const VpnConnected();
     } catch (e) {
       _connectTimeout?.cancel();
       state = VpnError(presentableError(e));

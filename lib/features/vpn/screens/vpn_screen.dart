@@ -623,7 +623,7 @@ class _SmartNodeTile extends StatelessWidget {
     child: _NodeCard(
       icon: Icons.auto_awesome_rounded,
       title: '智能选择',
-      subtitle: '自动选择首个订阅线路',
+      subtitle: '连接时自动验证并切换可用线路',
       selected: false,
       onTap: onTap,
     ),
@@ -657,7 +657,7 @@ class _NodeTileState extends State<_NodeTile> {
       return _NodeCard(
         icon: Icons.public_rounded,
         title: widget.node.name,
-        subtitle: '线路质量：$value',
+        subtitle: '接入延迟：$value（连接时验证出口）',
         selected: widget.selected,
         onTap: widget.onTap,
       );

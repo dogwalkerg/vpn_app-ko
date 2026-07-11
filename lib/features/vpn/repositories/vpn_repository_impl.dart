@@ -2,10 +2,19 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io'
-    show Directory, File, Platform, Process, ProcessSignal, ProcessStartMode;
+    show
+        Directory,
+        File,
+        HttpClient,
+        Platform,
+        Process,
+        ProcessSignal,
+        ProcessStartMode,
+        Socket;
 import 'dart:math' as math;
 
 import 'package:dio/dio.dart';
+import 'package:dio/io.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:crypto/crypto.dart' show sha256;
 import 'package:vpn_app/features/vpn/mappers/vpn_mapper.dart';
@@ -23,10 +32,17 @@ import '../models/subscription_node.dart';
 import 'vpn_repository.dart';
 
 class VpnRepositoryImpl implements VpnRepository {
-  VpnRepositoryImpl(this._api, {required this.selectedNode});
+  VpnRepositoryImpl(
+    this._api, {
+    required this.selectedNode,
+    required this.availableNodes,
+    required this.onNodeSelected,
+  });
 
   final ApiService _api;
   final SubscriptionNode? Function() selectedNode;
+  final List<SubscriptionNode> Function() availableNodes;
+  final void Function(SubscriptionNode) onNodeSelected;
   final VpnChannel _vpn = VpnChannel();
   FlutterV2ray? _v2ray;
   bool _v2rayConnected = false;
@@ -83,7 +99,7 @@ class VpnRepositoryImpl implements VpnRepository {
       if (Platform.isWindows || Platform.isMacOS) {
         await _connectClash(node);
       } else {
-        await _connectV2ray(node);
+        await _connectAndroidWithFallback(node);
       }
       return;
     }
@@ -223,12 +239,44 @@ class VpnRepositoryImpl implements VpnRepository {
       _v2rayConnected = false;
       throw Exception('代理核心启动超时，请更换节点后重试');
     }
-    await Future.delayed(const Duration(milliseconds: 800));
+    if (!await _waitForLocalPort(10809, const Duration(seconds: 12))) {
+      await engine.stopV2Ray();
+      _v2rayConnected = false;
+      throw Exception('代理核心已启动，但本地代理端口未就绪');
+    }
     if (!await _verifyAndroidProxy()) {
       await engine.stopV2Ray();
       _v2rayConnected = false;
       throw Exception('节点已连接但无法访问互联网，请刷新订阅或更换节点');
     }
+  }
+
+  Future<void> _connectAndroidWithFallback(SubscriptionNode selected) async {
+    Object? lastError;
+    for (final node in _candidateNodes(selected)) {
+      try {
+        await _connectV2ray(node);
+        onNodeSelected(node);
+        return;
+      } catch (error) {
+        lastError = error;
+        try {
+          await _v2ray?.stopV2Ray();
+        } catch (_) {}
+        _v2rayConnected = false;
+        await Future.delayed(const Duration(milliseconds: 300));
+      }
+    }
+    throw lastError ?? Exception('订阅中没有可用节点');
+  }
+
+  List<SubscriptionNode> _candidateNodes(SubscriptionNode selected) {
+    final result = <SubscriptionNode>[selected];
+    for (final node in availableNodes()) {
+      if (node.raw != selected.raw) result.add(node);
+      if (result.length >= 6) break;
+    }
+    return result;
   }
 
   String _buildAndroidV2rayConfig(String source) {
@@ -270,10 +318,14 @@ class VpnRepositoryImpl implements VpnRepository {
             status != null && status >= 200 && status < 500,
       ),
     );
-    for (final url in const [
-      'https://www.gstatic.com/generate_204',
-      'https://www.cloudflare.com/cdn-cgi/trace',
-    ]) {
+    client.httpClientAdapter = IOHttpClientAdapter(
+      createHttpClient: () {
+        final httpClient = HttpClient();
+        httpClient.findProxy = (_) => 'PROXY 127.0.0.1:10809';
+        return httpClient;
+      },
+    );
+    for (final url in const ['https://1.1.1.1/cdn-cgi/trace']) {
       try {
         final response = await client.get<void>(url);
         final status = response.statusCode ?? 0;
@@ -283,16 +335,33 @@ class VpnRepositoryImpl implements VpnRepository {
     return false;
   }
 
+  Future<bool> _waitForLocalPort(int port, Duration timeout) async {
+    final deadline = DateTime.now().add(timeout);
+    while (DateTime.now().isBefore(deadline)) {
+      Socket? socket;
+      try {
+        socket = await Socket.connect(
+          '127.0.0.1',
+          port,
+          timeout: const Duration(milliseconds: 500),
+        );
+        return true;
+      } catch (_) {
+        await Future.delayed(const Duration(milliseconds: 200));
+      } finally {
+        socket?.destroy();
+      }
+    }
+    return false;
+  }
+
   Future<void> _connectClash(SubscriptionNode node) async {
     if (await _isClashRunning()) {
       var attached = false;
       try {
-        await _selectClashNode(node);
         await _setDesktopProxy(true);
-        if (await _verifyDesktopProxy()) {
-          _clashAttached = true;
-          attached = true;
-        }
+        attached = await _selectUsableClashNode(node);
+        if (attached) _clashAttached = true;
       } catch (_) {
         // The existing process may have loaded an older subscription.
       }
@@ -329,13 +398,25 @@ class VpnRepositoryImpl implements VpnRepository {
       '127.0.0.1:9090',
     ], mode: ProcessStartMode.detachedWithStdio);
     await Future.delayed(const Duration(milliseconds: 800));
-    await _selectClashNode(node);
     await _setDesktopProxy(true);
-    if (!await _verifyDesktopProxy()) {
+    if (!await _selectUsableClashNode(node)) {
       await disconnect();
-      throw Exception('所选节点无法访问网络，请更换节点');
+      throw Exception('订阅中的候选节点均无法访问网络，请刷新订阅');
     }
     _clashAttached = true;
+  }
+
+  Future<bool> _selectUsableClashNode(SubscriptionNode selected) async {
+    for (final node in _candidateNodes(selected)) {
+      try {
+        await _selectClashNode(node);
+        if (await _verifyDesktopProxy()) {
+          onNodeSelected(node);
+          return true;
+        }
+      } catch (_) {}
+    }
+    return false;
   }
 
   Future<bool> _isClashRunning() async {
@@ -378,7 +459,7 @@ class VpnRepositoryImpl implements VpnRepository {
           '10',
           '--proxy',
           'http://127.0.0.1:7890',
-          'https://www.cloudflare.com/cdn-cgi/trace',
+          'https://1.1.1.1/cdn-cgi/trace',
         ],
       );
       final output = process.stdout.transform(utf8.decoder).join();
