@@ -25,7 +25,6 @@ dependencies:
   http: ^1.5.0
   font_awesome_flutter: ^10.9.0
   url_launcher: ^6.3.2
-  yookassa_payments_flutter: ^1.9.0
   webview_flutter: ^4.13.0
   device_info_plus: ^11.5.0
   webview_windows: ^0.4.0

@@ -6,6 +6,7 @@ import 'package:vpn_app/core/api/api_service.dart';
 import 'package:vpn_app/core/api/coco_api.dart';
 import 'package:vpn_app/core/cache/swr/swr_keys.dart';
 import 'package:vpn_app/core/cache/swr/swr_store.dart';
+import 'package:vpn_app/core/errors/error_mapper.dart';
 import 'package:vpn_app/features/subscription/mappers/subscription_mapper.dart';
 import '../../../core/cache/disk_cache.dart';
 import '../models/subscription_status.dart';
