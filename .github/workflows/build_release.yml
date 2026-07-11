@@ -116,10 +116,13 @@ jobs:
     - name: Show Windows build output
       shell: pwsh
       run: Get-ChildItem -Recurse build/windows | Select-Object FullName,Length | Out-String -Width 240
+    - name: Package Windows
+      shell: pwsh
+      run: Compress-Archive -Path build/windows/x64/runner/Release/* -DestinationPath app-release-windows.zip -Force
     - uses: actions/upload-artifact@v4
       with:
         name: app-release-windows
-        path: build/windows/x64/runner/Release/
+        path: app-release-windows.zip
         if-no-files-found: error
 
   build-macos:
@@ -161,10 +164,12 @@ jobs:
     - run: flutter pub get
     - run: flutter config --enable-macos-desktop
     - run: flutter build macos --release --dart-define=BASE_URL=${{ env.BASE_URL }}
+    - name: Package macOS
+      run: ditto -c -k --sequesterRsrc --keepParent build/macos/Build/Products/Release/vpn_app.app app-release-macos.zip
     - uses: actions/upload-artifact@v4
       with:
         name: app-release-macos
-        path: build/macos/Build/Products/Release/
+        path: app-release-macos.zip
         if-no-files-found: error
 
   release:
