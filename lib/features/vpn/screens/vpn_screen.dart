@@ -4,6 +4,9 @@ import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart';
+import 'package:vpn_app/core/router/routes.dart';
+import 'package:vpn_app/features/auth/providers/auth_providers.dart';
 import 'package:vpn_app/features/subscription/models/subscription_state.dart';
 import 'package:vpn_app/features/subscription/providers/subscription_providers.dart';
 import 'package:vpn_app/features/vpn/models/subscription_node.dart';
@@ -106,6 +109,11 @@ class _VpnScreenState extends ConsumerState<VpnScreen> {
         ),
       ),
       drawer: const AppDrawer(),
+      bottomNavigationBar: _BottomNavigation(
+        onHome: () {},
+        onNodes: () => _openNodePicker(context),
+        onSettings: () => _openSettings(context),
+      ),
       body: SafeArea(
         child: LayoutBuilder(
           builder: (context, constraints) => SingleChildScrollView(
@@ -123,7 +131,7 @@ class _VpnScreenState extends ConsumerState<VpnScreen> {
                       onRefresh: () =>
                           ref.invalidate(subscriptionNodesProvider),
                     ),
-                    const SizedBox(height: 34),
+                    const SizedBox(height: 18),
                     _PowerButton(
                       connected: connected,
                       busy: busy,
@@ -137,7 +145,7 @@ class _VpnScreenState extends ConsumerState<VpnScreen> {
                             : await controller.connectPressed();
                       },
                     ),
-                    const SizedBox(height: 28),
+                    const SizedBox(height: 16),
                     const Text(
                       '连接时长',
                       style: TextStyle(color: Color(0xFF8B909A), fontSize: 16),
@@ -151,7 +159,7 @@ class _VpnScreenState extends ConsumerState<VpnScreen> {
                         letterSpacing: 0,
                       ),
                     ),
-                    const SizedBox(height: 24),
+                    const SizedBox(height: 14),
                     _TrafficSummary(subscription: subscription),
                     const SizedBox(height: 12),
                     Row(
@@ -204,6 +212,19 @@ class _VpnScreenState extends ConsumerState<VpnScreen> {
       backgroundColor: const Color(0xFFF4F5F9),
       builder: (_) =>
           FractionallySizedBox(heightFactor: .94, child: const _NodePicker()),
+    );
+  }
+
+  Future<void> _openSettings(BuildContext context) {
+    return showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      useSafeArea: true,
+      backgroundColor: const Color(0xFFF4F5F9),
+      builder: (_) => const FractionallySizedBox(
+        heightFactor: .94,
+        child: _SettingsPanel(),
+      ),
     );
   }
 }
@@ -302,18 +323,18 @@ class _PowerButton extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) => SizedBox(
-    width: 280,
-    height: 280,
+    width: 210,
+    height: 210,
     child: DecoratedBox(
       decoration: BoxDecoration(
         shape: BoxShape.circle,
         color: const Color(0xFFE9EDF7),
-        border: Border.all(color: const Color(0xFFDDE3F0), width: 16),
+        border: Border.all(color: const Color(0xFFDDE3F0), width: 12),
       ),
       child: Center(
         child: Container(
-          width: 190,
-          height: 190,
+          width: 138,
+          height: 138,
           decoration: BoxDecoration(
             shape: BoxShape.circle,
             color: connected
@@ -349,7 +370,7 @@ class _PowerButton extends StatelessWidget {
                   else
                     const Icon(
                       Icons.power_settings_new_rounded,
-                      size: 52,
+                      size: 40,
                       color: Colors.white70,
                     ),
                   const SizedBox(height: 12),
@@ -388,10 +409,9 @@ class _TrafficSummary extends StatelessWidget {
       total = _bytes(status.trafficTotal);
       used = _bytes(status.trafficUsed);
       remaining = _bytes(
-        (status.trafficTotal - status.trafficUsed).clamp(
-          0,
-          status.trafficTotal,
-        ).toInt(),
+        (status.trafficTotal - status.trafficUsed)
+            .clamp(0, status.trafficTotal)
+            .toInt(),
       );
     }
     return Container(
@@ -710,6 +730,224 @@ class _NodeCard extends StatelessWidget {
             ),
           ],
         ),
+      ),
+    ),
+  );
+}
+
+class _BottomNavigation extends StatelessWidget {
+  const _BottomNavigation({
+    required this.onHome,
+    required this.onNodes,
+    required this.onSettings,
+  });
+  final VoidCallback onHome;
+  final VoidCallback onNodes;
+  final VoidCallback onSettings;
+
+  @override
+  Widget build(BuildContext context) => SafeArea(
+    top: false,
+    child: Container(
+      height: 62,
+      decoration: const BoxDecoration(
+        color: Color(0xFFF7F7F8),
+        border: Border(top: BorderSide(color: Color(0xFFE2E3E7))),
+      ),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.spaceAround,
+        children: [
+          _NavButton(
+            icon: Icons.home_rounded,
+            label: '主页',
+            selected: true,
+            onTap: onHome,
+          ),
+          _NavButton(icon: Icons.hub_rounded, label: '线路', onTap: onNodes),
+          _NavButton(
+            icon: Icons.settings_rounded,
+            label: '设置',
+            onTap: onSettings,
+          ),
+        ],
+      ),
+    ),
+  );
+}
+
+class _NavButton extends StatelessWidget {
+  const _NavButton({
+    required this.icon,
+    required this.label,
+    required this.onTap,
+    this.selected = false,
+  });
+  final IconData icon;
+  final String label;
+  final VoidCallback onTap;
+  final bool selected;
+
+  @override
+  Widget build(BuildContext context) => IconButton(
+    tooltip: label,
+    onPressed: onTap,
+    icon: Icon(
+      icon,
+      size: 27,
+      color: selected ? const Color(0xFF2D235E) : const Color(0xFF777A80),
+    ),
+  );
+}
+
+class _SettingsPanel extends ConsumerWidget {
+  const _SettingsPanel();
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final username = ref.watch(currentUsernameProvider) ?? '用户';
+    final subscription = ref.watch(subscriptionControllerProvider);
+    final status = subscription is SubscriptionReady
+        ? subscription.status
+        : null;
+    return Column(
+      children: [
+        const Padding(
+          padding: EdgeInsets.symmetric(vertical: 20),
+          child: Text(
+            '设置',
+            style: TextStyle(
+              color: Color(0xFF17191D),
+              fontSize: 25,
+              fontWeight: FontWeight.w800,
+            ),
+          ),
+        ),
+        Expanded(
+          child: ListView(
+            padding: const EdgeInsets.fromLTRB(18, 0, 18, 24),
+            children: [
+              Container(
+                padding: const EdgeInsets.all(20),
+                decoration: BoxDecoration(
+                  color: const Color(0xFF30235E),
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: Row(
+                  children: [
+                    const CircleAvatar(
+                      radius: 28,
+                      backgroundColor: Colors.white,
+                      child: Icon(
+                        Icons.cloud_rounded,
+                        color: Color(0xFFE7A622),
+                        size: 32,
+                      ),
+                    ),
+                    const SizedBox(width: 16),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            username,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: const TextStyle(
+                              color: Colors.white,
+                              fontSize: 18,
+                              fontWeight: FontWeight.w700,
+                            ),
+                          ),
+                          const SizedBox(height: 6),
+                          Text(
+                            status?.canUse == true ? 'VIP 已激活' : '订阅未激活',
+                            style: const TextStyle(color: Color(0xFFFFCC42)),
+                          ),
+                          Text(
+                            '余额：${status?.balance.toStringAsFixed(2) ?? '--'} 自由币',
+                            style: const TextStyle(color: Colors.white70),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 20),
+              _SettingsItem(
+                icon: Icons.diamond_rounded,
+                title: '会员中心与续费',
+                onTap: () {
+                  Navigator.pop(context);
+                  context.pushNamed(AppRoute.subscription.name);
+                },
+              ),
+              _SettingsItem(
+                icon: Icons.devices_rounded,
+                title: '设备管理',
+                onTap: () {
+                  Navigator.pop(context);
+                  context.pushNamed(AppRoute.devices.name);
+                },
+              ),
+              _SettingsItem(
+                icon: Icons.info_outline_rounded,
+                title: '关于应用',
+                onTap: () {
+                  Navigator.pop(context);
+                  context.pushNamed(AppRoute.about.name);
+                },
+              ),
+              _SettingsItem(
+                icon: Icons.logout_rounded,
+                title: '退出账号',
+                danger: true,
+                onTap: () async {
+                  Navigator.pop(context);
+                  await ref.read(authControllerProvider.notifier).logout();
+                  if (context.mounted) context.goNamed(AppRoute.login.name);
+                },
+              ),
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+class _SettingsItem extends StatelessWidget {
+  const _SettingsItem({
+    required this.icon,
+    required this.title,
+    required this.onTap,
+    this.danger = false,
+  });
+  final IconData icon;
+  final String title;
+  final VoidCallback onTap;
+  final bool danger;
+
+  @override
+  Widget build(BuildContext context) => Padding(
+    padding: const EdgeInsets.only(bottom: 10),
+    child: Material(
+      color: Colors.white,
+      borderRadius: BorderRadius.circular(8),
+      child: ListTile(
+        leading: Icon(
+          icon,
+          color: danger ? const Color(0xFFD14343) : const Color(0xFF30235E),
+        ),
+        title: Text(
+          title,
+          style: TextStyle(
+            color: danger ? const Color(0xFFD14343) : const Color(0xFF202226),
+            fontWeight: FontWeight.w600,
+          ),
+        ),
+        trailing: const Icon(Icons.chevron_right_rounded),
+        onTap: onTap,
       ),
     ),
   );

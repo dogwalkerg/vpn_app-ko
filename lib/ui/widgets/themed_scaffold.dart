@@ -7,6 +7,7 @@ class ThemedScaffold extends StatelessWidget {
   final Widget body;
   final Widget? floatingActionButton;
   final Widget? drawer;
+  final Widget? bottomNavigationBar;
   final bool safeArea;
   final Color? overlayColor;
 
@@ -16,6 +17,7 @@ class ThemedScaffold extends StatelessWidget {
     this.appBar,
     this.floatingActionButton,
     this.drawer,
+    this.bottomNavigationBar,
     this.safeArea = true,
     this.overlayColor,
   });
@@ -35,7 +37,9 @@ class ThemedScaffold extends StatelessWidget {
           opacity: t.opacities.overlay,
         ),
       ),
-      child: overlayColor == null ? const SizedBox.expand() : ColoredBox(color: overlayColor!),
+      child: overlayColor == null
+          ? const SizedBox.expand()
+          : ColoredBox(color: overlayColor!),
     );
 
     final content = safeArea ? SafeArea(child: body) : body;
@@ -47,6 +51,7 @@ class ThemedScaffold extends StatelessWidget {
           backgroundColor: Colors.transparent,
           appBar: appBar,
           drawer: drawer,
+          bottomNavigationBar: bottomNavigationBar,
           floatingActionButton: floatingActionButton,
           body: content,
         ),
