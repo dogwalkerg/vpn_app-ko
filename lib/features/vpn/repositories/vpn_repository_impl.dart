@@ -30,6 +30,8 @@ class VpnRepositoryImpl implements VpnRepository {
   FlutterV2ray? _v2ray;
   bool _v2rayConnected = false;
   Process? _clashProcess;
+  bool _clashAttached = false;
+  Future<void>? _coreDownload;
 
   static const String _tunnelName = 'vpn_app_tunnel';
   static const String _bundleId = 'com.example.vpn_app';
@@ -144,10 +146,15 @@ class VpnRepositoryImpl implements VpnRepository {
 
   @override
   Future<void> disconnect() async {
-    if (_clashProcess != null) {
+    if (_clashProcess != null || _clashAttached || await _isClashRunning()) {
       await _setDesktopProxy(false);
-      _clashProcess!.kill(ProcessSignal.sigterm);
+      try {
+        await Dio().post('http://127.0.0.1:9090/shutdown');
+      } catch (_) {
+        _clashProcess?.kill(ProcessSignal.sigterm);
+      }
       _clashProcess = null;
+      _clashAttached = false;
       return;
     }
     if (_v2ray != null) {
@@ -161,6 +168,10 @@ class VpnRepositoryImpl implements VpnRepository {
   @override
   Future<bool> isConnected() async {
     if (_clashProcess != null) return true;
+    if (Platform.isWindows || Platform.isMacOS) {
+      _clashAttached = await _isClashRunning();
+      if (_clashAttached) return true;
+    }
     if (_v2rayConnected) return true;
     final s = await _vpn.stage();
     return s == VpnStage.connected;
@@ -191,7 +202,12 @@ class VpnRepositoryImpl implements VpnRepository {
   }
 
   Future<void> _connectClash(SubscriptionNode node) async {
-    await disconnect();
+    if (await _isClashRunning()) {
+      await _selectClashNode(node);
+      await _setDesktopProxy(true);
+      _clashAttached = true;
+      return;
+    }
     final support = await getApplicationSupportDirectory();
     final directory = Directory(
       '${support.path}${Platform.pathSeparator}clash',
@@ -222,11 +238,28 @@ class VpnRepositoryImpl implements VpnRepository {
       '127.0.0.1:9090',
     ], mode: ProcessStartMode.detachedWithStdio);
     await Future.delayed(const Duration(milliseconds: 800));
+    await _selectClashNode(node);
+    _clashAttached = true;
+    await _setDesktopProxy(true);
+  }
+
+  Future<bool> _isClashRunning() async {
+    if (!Platform.isWindows && !Platform.isMacOS) return false;
+    try {
+      final response = await Dio(
+        BaseOptions(connectTimeout: const Duration(milliseconds: 800)),
+      ).get('http://127.0.0.1:9090/configs');
+      return response.statusCode == 200;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  Future<void> _selectClashNode(SubscriptionNode node) async {
     await Dio().put(
       'http://127.0.0.1:9090/proxies/Proxy',
       data: {'name': node.name},
     );
-    await _setDesktopProxy(true);
   }
 
   Future<({String url, String sha256})> _desktopCoreInfo() async {
@@ -253,18 +286,37 @@ class VpnRepositoryImpl implements VpnRepository {
   }
 
   Future<void> _ensureDesktopCore(File core) async {
+    final active = _coreDownload;
+    if (active != null) return active;
+    final future = _downloadDesktopCoreIfNeeded(core);
+    _coreDownload = future;
+    try {
+      await future;
+    } finally {
+      _coreDownload = null;
+    }
+  }
+
+  Future<void> _downloadDesktopCoreIfNeeded(File core) async {
     final info = await _desktopCoreInfo();
     if (await core.exists() && await _fileSha256(core) == info.sha256) return;
 
-    final partial = File('${core.path}.download');
-    if (await partial.exists()) await partial.delete();
+    final partial = File(
+      '${core.path}.download.${DateTime.now().microsecondsSinceEpoch}',
+    );
     await Dio().download(info.url, partial.path);
     final actual = await _fileSha256(partial);
     if (actual != info.sha256) {
       await partial.delete();
       throw Exception('代理核心校验失败');
     }
-    if (await core.exists()) await core.delete();
+    if (await core.exists()) {
+      if (await _fileSha256(core) == info.sha256) {
+        await partial.delete();
+        return;
+      }
+      await core.delete();
+    }
     await partial.rename(core.path);
   }
 
