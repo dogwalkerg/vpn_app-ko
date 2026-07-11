@@ -180,7 +180,12 @@ class VpnRepositoryImpl implements VpnRepository {
         _clashAttached = false;
       }
     }
-    if (_v2rayConnected) return true;
+    if (_v2rayConnected) {
+      final usable = await _verifyAndroidProxy();
+      if (usable) return true;
+      await _v2ray?.stopV2Ray();
+      _v2rayConnected = false;
+    }
     final s = await _vpn.stage();
     return s == VpnStage.connected;
   }
@@ -202,10 +207,11 @@ class VpnRepositoryImpl implements VpnRepository {
     final allowed = await engine.requestPermission();
     if (!allowed) throw Exception('未获得 VPN 权限');
     final parser = FlutterV2ray.parseFromURL(node.raw);
+    final config = _buildAndroidV2rayConfig(parser.getFullConfiguration());
     _v2rayReady = Completer<void>();
     await engine.startV2Ray(
       remark: parser.remark,
-      config: parser.getFullConfiguration(),
+      config: config,
       blockedApps: null,
       bypassSubnets: null,
       proxyOnly: false,
@@ -217,6 +223,50 @@ class VpnRepositoryImpl implements VpnRepository {
       _v2rayConnected = false;
       throw Exception('代理核心启动超时，请更换节点后重试');
     }
+    await Future.delayed(const Duration(milliseconds: 800));
+    if (!await _verifyAndroidProxy()) {
+      await engine.stopV2Ray();
+      _v2rayConnected = false;
+      throw Exception('节点已连接但无法访问互联网，请刷新订阅或更换节点');
+    }
+  }
+
+  String _buildAndroidV2rayConfig(String source) {
+    final config = (jsonDecode(source) as Map).cast<String, dynamic>();
+    config['dns'] = {
+      'queryStrategy': 'UseIP',
+      'servers': ['https://1.1.1.1/dns-query', 'https://8.8.8.8/dns-query'],
+    };
+    final routing =
+        (config['routing'] as Map?)?.cast<String, dynamic>() ??
+        <String, dynamic>{};
+    routing['domainStrategy'] = 'IPIfNonMatch';
+    config['routing'] = routing;
+    return jsonEncode(config);
+  }
+
+  Future<bool> _verifyAndroidProxy() async {
+    if (!Platform.isAndroid || !_v2rayConnected) return false;
+    final client = Dio(
+      BaseOptions(
+        connectTimeout: const Duration(seconds: 8),
+        receiveTimeout: const Duration(seconds: 8),
+        sendTimeout: const Duration(seconds: 8),
+        validateStatus: (status) =>
+            status != null && status >= 200 && status < 500,
+      ),
+    );
+    for (final url in const [
+      'https://www.gstatic.com/generate_204',
+      'https://www.cloudflare.com/cdn-cgi/trace',
+    ]) {
+      try {
+        final response = await client.get<void>(url);
+        final status = response.statusCode ?? 0;
+        if (status >= 200 && status < 500) return true;
+      } catch (_) {}
+    }
+    return false;
   }
 
   Future<void> _connectClash(SubscriptionNode node) async {
