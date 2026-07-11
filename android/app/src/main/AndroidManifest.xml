@@ -8,7 +8,7 @@
     <uses-permission android:name="android.permission.ACCESS_COARSE_UPDATES" />
     <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
     <application
-        android:label="UgbuganVPN"
+        android:label="自由云"
         android:name="${applicationName}"
         android:icon="@mipmap/ic_launcher2">
         <activity

@@ -43,7 +43,7 @@ class AboutScreen extends StatelessWidget {
                       ),
                       SizedBox(height: t.spacing.md),
                       Text(
-                        'UgbuganVPN',
+                        '自由云',
                         textAlign: TextAlign.center,
                         style: t.typography.h2.copyWith(
                           color: c.text,
@@ -95,7 +95,7 @@ class AboutScreen extends StatelessWidget {
                       ),
                       SizedBox(height: t.spacing.xxs),
                       Text(
-                        'UgbuganVPN 团队',
+                        '自由云团队',
                         textAlign: TextAlign.center,
                         style: t.typography.bodySm.copyWith(color: c.textMuted),
                       ),

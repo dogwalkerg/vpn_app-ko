@@ -32,7 +32,7 @@ class VpnScreen extends ConsumerWidget {
 
     return ThemedScaffold(
       appBar: AppCustomAppBar(
-        title: 'UgbuganVPN',
+        title: '自由云',
         leading: Builder(
           builder: (context) => IconButton(
             icon: Icon(Icons.menu, color: c.text),
@@ -128,7 +128,7 @@ class _NodeList extends ConsumerWidget {
   }
 }
 
-class _NodeTile extends StatelessWidget {
+class _NodeTile extends StatefulWidget {
   final SubscriptionNode node;
   final int index;
   final bool selected;
@@ -142,13 +142,34 @@ class _NodeTile extends StatelessWidget {
   });
 
   @override
+  State<_NodeTile> createState() => _NodeTileState();
+}
+
+class _NodeTileState extends State<_NodeTile> {
+  late Future<int?> _latency;
+
+  @override
+  void initState() {
+    super.initState();
+    _latency = measureNodeLatency(widget.node);
+  }
+
+  @override
+  void didUpdateWidget(covariant _NodeTile oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.node.raw != widget.node.raw) {
+      _latency = measureNodeLatency(widget.node);
+    }
+  }
+
+  @override
   Widget build(BuildContext context) {
     final t = context.tokens;
     final c = context.colors;
 
     return InkWell(
       borderRadius: BorderRadius.circular(8),
-      onTap: onTap,
+      onTap: widget.onTap,
       child: AnimatedContainer(
         duration: const Duration(milliseconds: 160),
         padding: EdgeInsets.symmetric(
@@ -156,10 +177,12 @@ class _NodeTile extends StatelessWidget {
           vertical: t.spacing.sm,
         ),
         decoration: BoxDecoration(
-          color: selected ? const Color(0xFF4B4B4B) : const Color(0xFF3E3E3E),
+          color: widget.selected
+              ? const Color(0xFF4B4B4B)
+              : const Color(0xFF3E3E3E),
           borderRadius: BorderRadius.circular(8),
           border: Border.all(
-            color: selected ? c.primary : Colors.transparent,
+            color: widget.selected ? c.primary : Colors.transparent,
             width: 1,
           ),
           boxShadow: const [
@@ -180,7 +203,10 @@ class _NodeTile extends StatelessWidget {
                 color: Colors.white,
                 borderRadius: BorderRadius.circular(5),
               ),
-              child: Text(node.flag, style: const TextStyle(fontSize: 24)),
+              child: Text(
+                widget.node.flag,
+                style: const TextStyle(fontSize: 24),
+              ),
             ),
             SizedBox(width: t.spacing.sm),
             Expanded(
@@ -189,7 +215,7 @@ class _NodeTile extends StatelessWidget {
                 mainAxisSize: MainAxisSize.min,
                 children: [
                   Text(
-                    node.country,
+                    widget.node.name,
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
                     style: t.typography.body.copyWith(
@@ -203,13 +229,25 @@ class _NodeTile extends StatelessWidget {
                       Icon(Icons.speed_rounded, color: c.info, size: 14),
                       SizedBox(width: t.spacing.xs),
                       Flexible(
-                        child: Text(
-                          '${node.speedMbps.toStringAsFixed(1)} Mbps',
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: t.typography.caption.copyWith(
-                            color: const Color(0xFFC9C9C9),
-                          ),
+                        child: FutureBuilder<int?>(
+                          future: _latency,
+                          builder: (context, snapshot) {
+                            final status =
+                                snapshot.connectionState ==
+                                    ConnectionState.waiting
+                                ? '测速中'
+                                : snapshot.data == null
+                                ? '超时'
+                                : '${snapshot.data} ms';
+                            return Text(
+                              '${widget.node.host}:${widget.node.port} · $status',
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: t.typography.caption.copyWith(
+                                color: const Color(0xFFC9C9C9),
+                              ),
+                            );
+                          },
                         ),
                       ),
                     ],
@@ -219,7 +257,7 @@ class _NodeTile extends StatelessWidget {
             ),
             SizedBox(width: t.spacing.sm),
             Text(
-              '$index',
+              '${widget.index}',
               style: t.typography.caption.copyWith(
                 color: const Color(0xFFC9C9C9),
                 fontWeight: FontWeight.w700,

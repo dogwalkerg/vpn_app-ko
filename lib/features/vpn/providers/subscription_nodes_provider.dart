@@ -1,5 +1,5 @@
 import 'dart:convert';
-import 'dart:math';
+import 'dart:io';
 
 import 'package:dio/dio.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -72,8 +72,6 @@ SubscriptionNode? _parseNode(String raw) {
       ? Uri.decodeComponent(uri.fragment)
       : '${uri.host}:${uri.port}';
   final country = _countryFromName(name);
-  final seed = raw.codeUnits.fold<int>(0, (a, b) => (a + b) & 0x7fffffff);
-  final random = Random(seed);
   return SubscriptionNode(
     name: name,
     type: type,
@@ -81,10 +79,28 @@ SubscriptionNode? _parseNode(String raw) {
     port: uri.port,
     country: country.$1,
     flag: country.$2,
-    speedMbps: 60 + random.nextInt(360) + random.nextDouble(),
-    load: 10 + random.nextInt(250),
+    speedMbps: 0,
+    load: 0,
     raw: raw,
   );
+}
+
+Future<int?> measureNodeLatency(SubscriptionNode node) async {
+  final stopwatch = Stopwatch()..start();
+  Socket? socket;
+  try {
+    socket = await Socket.connect(
+      node.host,
+      node.port,
+      timeout: const Duration(seconds: 5),
+    );
+    stopwatch.stop();
+    return stopwatch.elapsedMilliseconds.clamp(1, 9999).toInt();
+  } catch (_) {
+    return null;
+  } finally {
+    socket?.destroy();
+  }
 }
 
 (String, String) _countryFromName(String name) {

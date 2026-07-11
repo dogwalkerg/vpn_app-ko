@@ -102,7 +102,7 @@ class _MyApp extends ConsumerWidget {
     final router = ref.watch(routerProvider);
 
     return MaterialApp.router(
-      title: 'UgbuganVPN',
+      title: '自由云',
       theme: theme.lightTheme,
       darkTheme: theme.darkTheme,
       themeMode: theme.themeMode,
@@ -242,5 +242,4 @@ Future<void> _warmUpGifAllFrames(
     await codec.getNextFrame();
   }
 }
-
 
