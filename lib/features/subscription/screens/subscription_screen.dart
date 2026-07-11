@@ -4,7 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
-import 'package:vpn_app/core/api/api_service.dart';
+import 'package:vpn_app/core/api/coco_api.dart';
 import 'package:vpn_app/core/api/http_client.dart';
 import 'package:vpn_app/core/extensions/context_ext.dart';
 import 'package:vpn_app/core/extensions/nav_ext.dart';
@@ -47,12 +47,12 @@ class _SubscriptionScreenState extends ConsumerState<SubscriptionScreen> {
   }
 
   Future<List<SubscriptionPlan>> _fetchPlans() async {
-    final api = ref.read(apiServiceProvider);
-    final res = await api.get('/subscription/plans');
-    final data = (res.data as Map).cast<String, dynamic>();
-    final list = (data['plans'] as List? ?? const []);
+    final list = await ref.read(cocoApiProvider).plans();
     return list
-        .map((e) => SubscriptionPlan.fromJson((e as Map).cast<String, dynamic>()))
+        .map((e) => SubscriptionPlan.fromJson({
+              'id': e.id, 'name': e.name, 'duration_days': e.durationDays,
+              'traffic_bytes': e.trafficBytes, 'price': e.price, 'status': 1,
+            }))
         .where((p) => p.enabled)
         .toList();
   }
@@ -203,11 +203,13 @@ class _SubscriptionScreenState extends ConsumerState<SubscriptionScreen> {
               '账户余额：${ready.status.balance.toStringAsFixed(2)}',
               style: t.typography.body.copyWith(color: c.primary),
             ),
+            SizedBox(height: t.spacing.xs),
+            Text(
+              'VIP${ready.status.level} · 已用 ${_formatBytes(ready.status.trafficUsed)} / ${_formatBytes(ready.status.trafficTotal)}',
+              style: t.typography.caption.copyWith(color: c.textMuted),
+            ),
             SizedBox(height: t.spacing.lg),
-            if (!ready.status.isPaid || ready.status.isTrial)
-              (isPolling
-                  ? const SubscriptionConfirmingBlock()
-                  : _PlanChooser(plansFuture: _plansFuture)),
+            isPolling ? const SubscriptionConfirmingBlock() : _PlanChooser(plansFuture: _plansFuture),
             const Spacer(),
             SizedBox(height: t.spacing.xs),
           ],
@@ -239,6 +241,12 @@ class _SubscriptionScreenState extends ConsumerState<SubscriptionScreen> {
         return _screen(const Center(child: Text('暂无订阅数据')));
     }
   }
+}
+
+String _formatBytes(int bytes) {
+  const gb = 1024 * 1024 * 1024;
+  const tb = gb * 1024;
+  return bytes >= tb ? '${(bytes / tb).toStringAsFixed(2)} TB' : '${(bytes / gb).toStringAsFixed(2)} GB';
 }
 
 class _PlanChooser extends ConsumerWidget {
@@ -291,7 +299,7 @@ class _PlanTile extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final t = context.tokens;
     final c = context.colors;
-    final priceText = plan.price <= 0 ? '免费' : '¥${plan.price.toStringAsFixed(2)}';
+    final priceText = plan.price <= 0 ? '免费' : '${plan.price.toStringAsFixed(2)} 自由币';
     final trafficText = plan.trafficGb >= 1024
         ? '${(plan.trafficGb / 1024).toStringAsFixed(2)} TB'
         : '${plan.trafficGb.toStringAsFixed(0)} GB';

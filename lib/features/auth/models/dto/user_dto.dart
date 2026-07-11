@@ -6,7 +6,7 @@ class UserDto {
 
   factory UserDto.fromJson(Map<String, dynamic> json) => UserDto(
         username: (json['username'] as String?) ?? '',
-        email: json['email'] as String?,
+        email: (json['email'] ?? json['true_name'])?.toString(),
       );
 
   Map<String, dynamic> toJson() => {
@@ -14,4 +14,3 @@ class UserDto {
         if (email != null) 'email': email,
       };
 }
-

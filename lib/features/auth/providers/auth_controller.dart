@@ -8,7 +8,6 @@ import 'package:vpn_app/features/subscription/providers/subscription_controller.
 import 'package:vpn_app/features/vpn/providers/vpn_controller.dart';
 import '../../../core/errors/exceptions.dart';
 import '../../../core/storage/secure_storage.dart';
-import '../../devices/providers/device_providers.dart';
 import '../models/domain/user.dart';
 import '../repositories/auth_repository_impl.dart';
 import '../usecases/login_usecase.dart';
@@ -94,7 +93,6 @@ class AuthController extends StateNotifier<AuthState> {
       _userCache.set(user);
       state = FeatureReady<User>(user);
       await ref.read(subscriptionControllerProvider.notifier).fetch();
-      unawaited(ref.read(deviceControllerProvider.notifier).touchLastSeen());
     } catch (_) {
       // 静默忽略登出异常。
     }
@@ -116,8 +114,6 @@ class AuthController extends StateNotifier<AuthState> {
       state = FeatureReady<User>(res.user);
 
       await ref.read(subscriptionControllerProvider.notifier).fetch();
-      await ref.read(deviceControllerProvider.notifier).addCurrent();
-      unawaited(ref.read(deviceControllerProvider.notifier).load());
     } on ApiException catch (e) {
       if (!ct.isCancelled) state = FeatureError<User>(e.message);
     } catch (_) {
@@ -155,7 +151,6 @@ class AuthController extends StateNotifier<AuthState> {
       _userCache.set(user);
       state = FeatureReady<User>(user);
       await ref.read(subscriptionControllerProvider.notifier).fetch();
-      unawaited(ref.read(deviceControllerProvider.notifier).touchLastSeen());
     } on UnauthorizedException {
       await logout(silent: true);
       state = const FeatureIdle();
@@ -176,7 +171,6 @@ class AuthController extends StateNotifier<AuthState> {
     await AppSecureStorage.clearToken();
 
     ref.invalidate(subscriptionControllerProvider);
-    ref.invalidate(deviceControllerProvider);
 
     state = const FeatureIdle();
   }

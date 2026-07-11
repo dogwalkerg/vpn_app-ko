@@ -17,6 +17,8 @@ Never throwFromResponse(Response res) {
       msg = data['error'].toString();
     } else if (data['message'] != null) {
       msg = data['message'].toString();
+    } else if (data['info'] != null) {
+      msg = data['info'].toString();
     }
   }
 

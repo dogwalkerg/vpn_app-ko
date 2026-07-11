@@ -3,6 +3,7 @@ import 'dart:math';
 
 import 'package:dio/dio.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:vpn_app/core/api/coco_api.dart';
 import 'package:vpn_app/features/subscription/models/subscription_state.dart';
 import 'package:vpn_app/features/subscription/providers/subscription_providers.dart';
 import 'package:vpn_app/features/vpn/models/subscription_node.dart';
@@ -12,13 +13,9 @@ final subscriptionNodesProvider = FutureProvider<List<SubscriptionNode>>((ref) a
   if (subState is! SubscriptionReady) return const [];
 
   final subUrl = subState.status.subUrl.trim();
-  if (subUrl.isEmpty) return const [];
-
-  final res = await Dio().get<String>(
-    subUrl,
-    options: Options(responseType: ResponseType.plain),
-  );
-  final text = res.data ?? '';
+  final text = subUrl.isEmpty
+      ? await ref.read(cocoApiProvider).subscriptionText()
+      : (await Dio().get<String>(subUrl, options: Options(responseType: ResponseType.plain))).data ?? '';
   return parseSubscriptionNodes(text);
 }, name: 'subscriptionNodes');
 

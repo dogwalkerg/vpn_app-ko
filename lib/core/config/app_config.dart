@@ -16,12 +16,12 @@ class AppConfig {
     required this.paymentCancelPrefix,
   });
 
-  static const _kDefaultBaseUrl = 'https://app.xsh.ccwu.cc';
+  static const _kDefaultBaseUrl = 'https://1api.cnam.ccwu.cc';
   static const _kDefaultConnectMs = 15000;
   static const _kDefaultReceiveMs = 15000;
 
-  static const _kDefaultPaySuccess = 'https://app.xsh.ccwu.cc/payment-return';
-  static const _kDefaultPayCancel = 'https://app.xsh.ccwu.cc/payment-return';
+  static const _kDefaultPaySuccess = 'https://coco.cnam.ccwu.cc';
+  static const _kDefaultPayCancel = 'https://coco.cnam.ccwu.cc';
 
   static AppConfig fromEnv() {
     final baseUrl = const String.fromEnvironment('BASE_URL', defaultValue: _kDefaultBaseUrl);

@@ -4,6 +4,8 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:vpn_app/core/extensions/context_ext.dart';
 import 'package:vpn_app/core/extensions/nav_ext.dart';
+import 'package:vpn_app/core/api/coco_api.dart';
+import 'package:vpn_app/features/subscription/providers/subscription_providers.dart';
 import 'package:vpn_app/ui/theme/theme_provider.dart';
 import 'package:vpn_app/features/auth/providers/auth_providers.dart';
 import 'package:vpn_app/ui/widgets/atoms/list_tile_x.dart';
@@ -63,12 +65,38 @@ class AppDrawer extends ConsumerWidget {
             },
           ),
           ListTileX(
-            leadingIcon: Icons.devices,
+            leadingIcon: Icons.event_available_rounded,
             leadingColor: c.info,
-            title: '设备管理',
-            onTap: () {
+            title: '每日签到',
+            onTap: () async {
               context.pop();
-              rootCtx.pushDevices();
+              try {
+                final before = await ref.read(cocoApiProvider).userInfo();
+                final after = await ref.read(cocoApiProvider).checkin();
+                await ref.read(subscriptionControllerProvider.notifier).fetch();
+                final reward = (after.trafficTotal - before.trafficTotal) / (1024 * 1024);
+                if (rootCtxOrNull != null) showAppSnackbar(rootCtx, text: '签到成功，获得 ${reward.toStringAsFixed(0)} MB 流量', type: AppSnackbarType.success);
+              } catch (error) {
+                if (rootCtxOrNull != null) showAppSnackbar(rootCtx, text: error.toString(), type: AppSnackbarType.error);
+              }
+            },
+          ),
+          ListTileX(
+            leadingIcon: Icons.campaign_outlined,
+            leadingColor: c.highlight,
+            title: '公告',
+            onTap: () async {
+              context.pop();
+              try {
+                final rows = await ref.read(cocoApiProvider).announcements();
+                if (rootCtxOrNull == null) return;
+                await showDialog<void>(context: rootCtx, builder: (dialog) => AlertDialog(
+                  title: const Text('公告'), content: SingleChildScrollView(child: Text(rows.isEmpty ? '暂无公告' : rows.map((e) => e.markdown).join('\n\n'))),
+                  actions: [TextButton(onPressed: () => Navigator.pop(dialog), child: const Text('关闭'))],
+                ));
+              } catch (error) {
+                if (rootCtxOrNull != null) showAppSnackbar(rootCtx, text: error.toString(), type: AppSnackbarType.error);
+              }
             },
           ),
           ListTileX(
