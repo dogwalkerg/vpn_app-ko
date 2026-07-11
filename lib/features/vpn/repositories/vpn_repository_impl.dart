@@ -233,6 +233,18 @@ class VpnRepositoryImpl implements VpnRepository {
 
   String _buildAndroidV2rayConfig(String source) {
     final config = (jsonDecode(source) as Map).cast<String, dynamic>();
+    final inbounds = ((config['inbounds'] as List?) ?? const [])
+        .map((item) => (item as Map).cast<String, dynamic>())
+        .toList();
+    inbounds.removeWhere((inbound) => inbound['tag'] == 'http');
+    inbounds.add({
+      'tag': 'http',
+      'protocol': 'http',
+      'listen': '127.0.0.1',
+      'port': 10809,
+      'settings': <String, dynamic>{},
+    });
+    config['inbounds'] = inbounds;
     config['dns'] = {
       'queryStrategy': 'UseIP',
       // The plugin also passes these values to VpnService.addDnsServer,

@@ -101,6 +101,7 @@ class _VpnScreenState extends ConsumerState<VpnScreen> {
     WidgetsBinding.instance.addPostFrameCallback((_) => _syncTimer(connected));
 
     return ThemedScaffold(
+      overlayColor: const Color(0xFFF2F4F7),
       appBar: AppCustomAppBar(
         title: '自由云',
         leading: Builder(
