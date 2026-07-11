@@ -5,6 +5,7 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+import 'package:vpn_app/core/api/coco_api.dart';
 import 'package:vpn_app/core/router/routes.dart';
 import 'package:vpn_app/features/auth/providers/auth_providers.dart';
 import 'package:vpn_app/features/subscription/models/subscription_state.dart';
@@ -15,6 +16,7 @@ import 'package:vpn_app/features/vpn/providers/vpn_providers.dart';
 import 'package:vpn_app/ui/widgets/app_custom_appbar.dart';
 import 'package:vpn_app/ui/widgets/app_drawer.dart';
 import 'package:vpn_app/ui/widgets/themed_scaffold.dart';
+import 'package:vpn_app/ui/widgets/app_snackbar.dart';
 
 class VpnScreen extends ConsumerStatefulWidget {
   const VpnScreen({super.key});
@@ -895,12 +897,103 @@ class _SettingsPanel extends ConsumerWidget {
                 },
               ),
               _SettingsItem(
+                icon: Icons.event_available_rounded,
+                title: '每日签到',
+                onTap: () async {
+                  try {
+                    final before = await ref.read(cocoApiProvider).userInfo();
+                    final after = await ref.read(cocoApiProvider).checkin();
+                    await ref
+                        .read(subscriptionControllerProvider.notifier)
+                        .fetch();
+                    final reward =
+                        (after.trafficTotal - before.trafficTotal) /
+                        (1024 * 1024);
+                    if (context.mounted) {
+                      showAppSnackbar(
+                        context,
+                        text: '签到成功，获得 ${reward.toStringAsFixed(0)} MB 流量',
+                        type: AppSnackbarType.success,
+                      );
+                    }
+                  } catch (error) {
+                    if (context.mounted) {
+                      showAppSnackbar(
+                        context,
+                        text: error.toString(),
+                        type: AppSnackbarType.error,
+                      );
+                    }
+                  }
+                },
+              ),
+              _SettingsItem(
+                icon: Icons.campaign_outlined,
+                title: '公告',
+                onTap: () async {
+                  try {
+                    final rows = await ref
+                        .read(cocoApiProvider)
+                        .announcements();
+                    if (!context.mounted) return;
+                    await showDialog<void>(
+                      context: context,
+                      builder: (dialogContext) => AlertDialog(
+                        title: const Text('公告'),
+                        content: SingleChildScrollView(
+                          child: Text(
+                            rows.isEmpty
+                                ? '暂无公告'
+                                : rows
+                                      .map((item) => item.markdown)
+                                      .join('\n\n'),
+                          ),
+                        ),
+                        actions: [
+                          TextButton(
+                            onPressed: () => Navigator.pop(dialogContext),
+                            child: const Text('关闭'),
+                          ),
+                        ],
+                      ),
+                    );
+                  } catch (error) {
+                    if (context.mounted) {
+                      showAppSnackbar(
+                        context,
+                        text: error.toString(),
+                        type: AppSnackbarType.error,
+                      );
+                    }
+                  }
+                },
+              ),
+              _SettingsItem(
                 icon: Icons.info_outline_rounded,
                 title: '关于应用',
                 onTap: () {
                   Navigator.pop(context);
                   context.pushNamed(AppRoute.about.name);
                 },
+              ),
+              _SettingsItem(
+                icon: Icons.help_outline_rounded,
+                title: '帮助',
+                onTap: () => showDialog<void>(
+                  context: context,
+                  builder: (dialogContext) => AlertDialog(
+                    title: const Text('使用帮助'),
+                    content: const Text(
+                      '刷新订阅后选择线路，返回主页点击加速。连接成功后再次点击可断开代理。若线路不可用，请刷新并更换节点。',
+                    ),
+                    actions: [
+                      TextButton(
+                        onPressed: () => Navigator.pop(dialogContext),
+                        child: const Text('知道了'),
+                      ),
+                    ],
+                  ),
+                ),
               ),
               _SettingsItem(
                 icon: Icons.logout_rounded,
