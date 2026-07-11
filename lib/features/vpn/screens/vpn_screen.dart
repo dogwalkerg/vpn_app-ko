@@ -52,6 +52,7 @@ class VpnScreen extends ConsumerWidget {
                 data: (items) => _SelectedNodeCard(
                   nodes: items,
                   onTap: () => _showNodePicker(context, ref, items),
+                  onRefresh: () => ref.invalidate(subscriptionNodesProvider),
                 ),
                 loading: () => const Padding(
                   padding: EdgeInsets.all(24),
@@ -140,8 +141,13 @@ class VpnScreen extends ConsumerWidget {
 class _SelectedNodeCard extends ConsumerWidget {
   final List<SubscriptionNode> nodes;
   final VoidCallback onTap;
+  final VoidCallback onRefresh;
 
-  const _SelectedNodeCard({required this.nodes, required this.onTap});
+  const _SelectedNodeCard({
+    required this.nodes,
+    required this.onTap,
+    required this.onRefresh,
+  });
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -186,6 +192,12 @@ class _SelectedNodeCard extends ConsumerWidget {
                       ),
                     ],
                   ),
+                ),
+                IconButton(
+                  tooltip: '刷新订阅',
+                  onPressed: onRefresh,
+                  icon: const Icon(Icons.refresh_rounded),
+                  color: c.textMuted,
                 ),
                 Icon(Icons.chevron_right_rounded, color: c.textMuted),
               ],
@@ -240,9 +252,15 @@ class _NodeList extends ConsumerWidget {
           node: node,
           index: index + 1,
           selected: selected?.raw == node.raw,
-          onTap: () {
+          onTap: () async {
+            final vpnState = ref.read(vpnControllerProvider);
+            if (vpnState is VpnConnected || vpnState is VpnConnecting) {
+              await ref
+                  .read(vpnControllerProvider.notifier)
+                  .disconnectPressed();
+            }
             ref.read(selectedSubscriptionNodeProvider.notifier).state = node;
-            if (closeOnSelect) Navigator.of(context).pop();
+            if (closeOnSelect && context.mounted) Navigator.of(context).pop();
           },
         );
       },

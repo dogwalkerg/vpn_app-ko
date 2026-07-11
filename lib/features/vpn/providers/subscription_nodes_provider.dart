@@ -21,10 +21,16 @@ final subscriptionNodesProvider = FutureProvider<List<SubscriptionNode>>((
   final subUrl = subState.status.subUrl.trim();
   final text = subUrl.isEmpty
       ? await ref.read(cocoApiProvider).subscriptionText()
-      : (await Dio().get<String>(
-              subUrl,
-              options: Options(responseType: ResponseType.plain),
-            )).data ??
+      : (await Dio(
+                  BaseOptions(
+                    connectTimeout: const Duration(seconds: 10),
+                    receiveTimeout: const Duration(seconds: 15),
+                  ),
+                ).get<String>(
+                  subUrl,
+                  options: Options(responseType: ResponseType.plain),
+                ))
+                .data ??
             '';
   final nodes = parseSubscriptionNodes(text);
   final selected = ref.read(selectedSubscriptionNodeProvider);
