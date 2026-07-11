@@ -42,47 +42,94 @@ class VpnScreen extends ConsumerWidget {
       ),
       drawer: const AppDrawer(),
       body: SafeArea(
+        child: SingleChildScrollView(
+          padding: EdgeInsets.only(bottom: t.spacing.xl),
+          child: Column(
+            children: [
+              const SubscriptionBanner(),
+              SizedBox(height: t.spacing.md),
+              nodes.when(
+                data: (items) => _SelectedNodeCard(
+                  nodes: items,
+                  onTap: () => _showNodePicker(context, ref, items),
+                ),
+                loading: () => const Padding(
+                  padding: EdgeInsets.all(24),
+                  child: CircularProgressIndicator(),
+                ),
+                error: (error, _) => _NodeLoadError(
+                  onRetry: () => ref.invalidate(subscriptionNodesProvider),
+                ),
+              ),
+              SizedBox(height: t.spacing.lg),
+              if (isAllowed) ...[
+                AnimationButton(
+                  isConnected: isConnected,
+                  isConnecting: isBusy,
+                  onConnect: () async {
+                    if (isConnected) {
+                      await vpn.disconnectPressed();
+                    } else {
+                      await vpn.connectPressed();
+                    }
+                  },
+                ),
+                Text(
+                  isBusy
+                      ? '连接中...'
+                      : isConnected
+                      ? '已连接'
+                      : '点击开启代理',
+                  style: t.typography.h3.copyWith(
+                    color: isConnected ? c.success : c.textMuted,
+                  ),
+                ),
+                SizedBox(height: t.spacing.lg),
+              ],
+              if (error != null)
+                Padding(
+                  padding: t.spacing.all(t.spacing.md),
+                  child: Text(
+                    error,
+                    style: t.typography.body.copyWith(
+                      color: c.danger,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Future<void> _showNodePicker(
+    BuildContext context,
+    WidgetRef ref,
+    List<SubscriptionNode> nodes,
+  ) {
+    return showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      useSafeArea: true,
+      builder: (sheetContext) => FractionallySizedBox(
+        heightFactor: 0.92,
         child: Column(
           children: [
-            const SubscriptionBanner(),
-            SizedBox(height: t.spacing.md),
-            if (isAllowed) ...[
-              AnimationButton(
-                isConnected: isConnected,
-                isConnecting: isBusy,
-                onConnect: () async {
-                  if (isConnected) {
-                    await vpn.disconnectPressed();
-                  } else {
-                    await vpn.connectPressed();
-                  }
+            ListTile(
+              title: const Text('选择线路'),
+              trailing: IconButton(
+                tooltip: '刷新节点',
+                icon: const Icon(Icons.refresh_rounded),
+                onPressed: () {
+                  Navigator.of(sheetContext).pop();
+                  ref.invalidate(subscriptionNodesProvider);
                 },
               ),
-              SizedBox(height: t.spacing.md),
-            ],
-            if (error != null)
-              Padding(
-                padding: t.spacing.all(t.spacing.md),
-                child: Text(
-                  error,
-                  style: t.typography.body.copyWith(
-                    color: c.danger,
-                    fontWeight: FontWeight.w600,
-                  ),
-                ),
-              ),
-            Expanded(
-              child: nodes.when(
-                data: (items) => _NodeList(nodes: items),
-                loading: () => const Center(child: CircularProgressIndicator()),
-                error: (e, _) => Center(
-                  child: Text(
-                    '节点加载失败',
-                    style: t.typography.body.copyWith(color: c.danger),
-                  ),
-                ),
-              ),
             ),
+            const Divider(height: 1),
+            Expanded(child: _NodeList(nodes: nodes, closeOnSelect: true)),
           ],
         ),
       ),
@@ -90,10 +137,83 @@ class VpnScreen extends ConsumerWidget {
   }
 }
 
+class _SelectedNodeCard extends ConsumerWidget {
+  final List<SubscriptionNode> nodes;
+  final VoidCallback onTap;
+
+  const _SelectedNodeCard({required this.nodes, required this.onTap});
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final t = context.tokens;
+    final c = context.colors;
+    final selected = ref.watch(selectedSubscriptionNodeProvider);
+    return Padding(
+      padding: EdgeInsets.symmetric(horizontal: t.spacing.md),
+      child: Material(
+        color: c.bgLight,
+        borderRadius: t.radii.brMd,
+        child: InkWell(
+          borderRadius: t.radii.brMd,
+          onTap: nodes.isEmpty ? null : onTap,
+          child: Padding(
+            padding: t.spacing.all(t.spacing.md),
+            child: Row(
+              children: [
+                CircleAvatar(
+                  backgroundColor: c.bg,
+                  child: Text(selected?.flag ?? '🌐'),
+                ),
+                SizedBox(width: t.spacing.md),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        selected?.name ?? (nodes.isEmpty ? '暂无可用线路' : '智能选择'),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: t.typography.h3.copyWith(color: c.text),
+                      ),
+                      SizedBox(height: t.spacing.xs),
+                      Text(
+                        selected == null
+                            ? '点击选择节点'
+                            : '${selected.host}:${selected.port}',
+                        style: t.typography.caption.copyWith(
+                          color: c.textMuted,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                Icon(Icons.chevron_right_rounded, color: c.textMuted),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _NodeLoadError extends StatelessWidget {
+  final VoidCallback onRetry;
+  const _NodeLoadError({required this.onRetry});
+
+  @override
+  Widget build(BuildContext context) => TextButton.icon(
+    onPressed: onRetry,
+    icon: const Icon(Icons.refresh_rounded),
+    label: const Text('节点加载失败，点击重试'),
+  );
+}
+
 class _NodeList extends ConsumerWidget {
   final List<SubscriptionNode> nodes;
+  final bool closeOnSelect;
 
-  const _NodeList({required this.nodes});
+  const _NodeList({required this.nodes, this.closeOnSelect = false});
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -120,8 +240,10 @@ class _NodeList extends ConsumerWidget {
           node: node,
           index: index + 1,
           selected: selected?.raw == node.raw,
-          onTap: () =>
-              ref.read(selectedSubscriptionNodeProvider.notifier).state = node,
+          onTap: () {
+            ref.read(selectedSubscriptionNodeProvider.notifier).state = node;
+            if (closeOnSelect) Navigator.of(context).pop();
+          },
         );
       },
     );
