@@ -8,8 +8,11 @@ on:
         required: false
         default: "1.0.3"
 
+permissions:
+  contents: write
+
 env:
-  BASE_URL: "https://app.xsh.ccwu.cc"
+  BASE_URL: "https://1api.cnam.ccwu.cc"
 
 jobs:
   analyze:
@@ -56,10 +59,7 @@ jobs:
         from pathlib import Path
         podfile = Path('ios/Podfile')
         text = podfile.read_text()
-        sources = [
-            "source 'https://github.com/CocoaPods/Specs.git'",
-            "source 'https://git.yoomoney.ru/scm/sdk/cocoa-pod-specs.git'",
-        ]
+        sources = ["source 'https://github.com/CocoaPods/Specs.git'"]
         for source in reversed(sources):
             if source not in text:
                 text = source + '\n' + text
