@@ -374,14 +374,7 @@ class VpnRepositoryImpl implements VpnRepository {
     );
     await directory.create(recursive: true);
 
-    final response = await _api.get<String>(
-      '/v1/link',
-      options: Options(responseType: ResponseType.plain),
-    );
-    if ((response.statusCode ?? 0) < 200 || (response.statusCode ?? 0) >= 300) {
-      throwFromResponse(response);
-    }
-    final yaml = 'mixed-port: 7890\n${response.data ?? ''}';
+    final yaml = _buildMihomoConfig(availableNodes());
     await File(
       '${directory.path}${Platform.pathSeparator}config.yaml',
     ).writeAsString(yaml);
@@ -404,6 +397,64 @@ class VpnRepositoryImpl implements VpnRepository {
       throw Exception('订阅中的候选节点均无法访问网络，请刷新订阅');
     }
     _clashAttached = true;
+  }
+
+  String _buildMihomoConfig(List<SubscriptionNode> nodes) {
+    final vlessNodes = nodes
+        .where((node) => node.raw.toLowerCase().startsWith('vless://'))
+        .toList();
+    if (vlessNodes.isEmpty) throw Exception('订阅中没有兼容的 VLESS 节点');
+
+    String quoted(String value) => jsonEncode(value);
+    final buffer = StringBuffer()
+      ..writeln('mixed-port: 7890')
+      ..writeln('allow-lan: false')
+      ..writeln('mode: rule')
+      ..writeln('log-level: info')
+      ..writeln('proxies:');
+    for (final node in vlessNodes) {
+      final uri = Uri.parse(node.raw);
+      final query = uri.queryParameters;
+      final sni = query['sni'] ?? query['host'] ?? uri.host;
+      final host = query['host'] ?? sni;
+      final path = query['path'] ?? '/';
+      final network = query['type'] ?? 'tcp';
+      buffer
+        ..writeln('  - name: ${quoted(node.name)}')
+        ..writeln('    type: vless')
+        ..writeln('    server: ${quoted(uri.host)}')
+        ..writeln('    port: ${uri.port}')
+        ..writeln('    uuid: ${quoted(uri.userInfo)}')
+        ..writeln('    udp: true')
+        ..writeln('    packet-encoding: xudp')
+        ..writeln('    tls: ${query['security'] == 'tls'}')
+        ..writeln('    servername: ${quoted(sni)}')
+        ..writeln('    client-fingerprint: ${quoted(query['fp'] ?? 'chrome')}')
+        ..writeln('    network: $network');
+      final flow = query['flow'];
+      if (flow != null && flow.isNotEmpty) {
+        buffer.writeln('    flow: ${quoted(flow)}');
+      }
+      if (network == 'ws') {
+        buffer
+          ..writeln('    ws-opts:')
+          ..writeln('      path: ${quoted(path)}')
+          ..writeln('      headers:')
+          ..writeln('        Host: ${quoted(host)}');
+      }
+    }
+    buffer
+      ..writeln('proxy-groups:')
+      ..writeln('  - name: Proxy')
+      ..writeln('    type: select')
+      ..writeln('    proxies:');
+    for (final node in vlessNodes) {
+      buffer.writeln('      - ${quoted(node.name)}');
+    }
+    buffer
+      ..writeln('rules:')
+      ..writeln('  - MATCH,Proxy');
+    return buffer.toString();
   }
 
   Future<bool> _selectUsableClashNode(SubscriptionNode selected) async {
