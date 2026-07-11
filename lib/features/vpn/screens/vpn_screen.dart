@@ -93,6 +93,7 @@ class _VpnScreenState extends ConsumerState<VpnScreen> {
     final subscription = ref.watch(subscriptionControllerProvider);
     final allowed = ref.watch(vpnAccessProvider);
     final connected = vpnState is VpnConnected;
+    final disconnecting = vpnState is VpnDisconnecting;
     final busy = vpnState is VpnConnecting || vpnState is VpnDisconnecting;
     final error = vpnState is VpnError ? vpnState.message : null;
     WidgetsBinding.instance.addPostFrameCallback((_) => _syncTimer(connected));
@@ -117,7 +118,7 @@ class _VpnScreenState extends ConsumerState<VpnScreen> {
       body: SafeArea(
         child: LayoutBuilder(
           builder: (context, constraints) => SingleChildScrollView(
-            padding: const EdgeInsets.fromLTRB(18, 12, 18, 28),
+            padding: const EdgeInsets.fromLTRB(18, 6, 18, 12),
             child: Center(
               child: ConstrainedBox(
                 constraints: const BoxConstraints(maxWidth: 620),
@@ -131,10 +132,11 @@ class _VpnScreenState extends ConsumerState<VpnScreen> {
                       onRefresh: () =>
                           ref.invalidate(subscriptionNodesProvider),
                     ),
-                    const SizedBox(height: 18),
+                    const SizedBox(height: 12),
                     _PowerButton(
                       connected: connected,
                       busy: busy,
+                      disconnecting: disconnecting,
                       enabled: allowed && selected != null,
                       onPressed: () async {
                         final controller = ref.read(
@@ -145,7 +147,7 @@ class _VpnScreenState extends ConsumerState<VpnScreen> {
                             : await controller.connectPressed();
                       },
                     ),
-                    const SizedBox(height: 16),
+                    const SizedBox(height: 10),
                     const Text(
                       '连接时长',
                       style: TextStyle(color: Color(0xFF8B909A), fontSize: 16),
@@ -154,14 +156,14 @@ class _VpnScreenState extends ConsumerState<VpnScreen> {
                     Text(
                       _durationText(_connectedFor),
                       style: const TextStyle(
-                        fontSize: 38,
+                        fontSize: 30,
                         fontWeight: FontWeight.w700,
                         letterSpacing: 0,
                       ),
                     ),
-                    const SizedBox(height: 14),
+                    const SizedBox(height: 10),
                     _TrafficSummary(subscription: subscription),
-                    const SizedBox(height: 12),
+                    const SizedBox(height: 8),
                     Row(
                       children: [
                         Expanded(
@@ -251,12 +253,12 @@ class _CurrentNodeCard extends StatelessWidget {
       onTap: onTap,
       borderRadius: BorderRadius.circular(8),
       child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 15),
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
         child: Row(
           children: [
             Container(
-              width: 48,
-              height: 48,
+              width: 42,
+              height: 42,
               alignment: Alignment.center,
               decoration: const BoxDecoration(
                 color: Color(0xFFF0F2F7),
@@ -313,28 +315,30 @@ class _PowerButton extends StatelessWidget {
   const _PowerButton({
     required this.connected,
     required this.busy,
+    required this.disconnecting,
     required this.enabled,
     required this.onPressed,
   });
   final bool connected;
   final bool busy;
+  final bool disconnecting;
   final bool enabled;
   final VoidCallback onPressed;
 
   @override
   Widget build(BuildContext context) => SizedBox(
-    width: 210,
-    height: 210,
+    width: 160,
+    height: 160,
     child: DecoratedBox(
       decoration: BoxDecoration(
         shape: BoxShape.circle,
         color: const Color(0xFFE9EDF7),
-        border: Border.all(color: const Color(0xFFDDE3F0), width: 12),
+        border: Border.all(color: const Color(0xFFDDE3F0), width: 9),
       ),
       child: Center(
         child: Container(
-          width: 138,
-          height: 138,
+          width: 104,
+          height: 104,
           decoration: BoxDecoration(
             shape: BoxShape.circle,
             color: connected
@@ -360,8 +364,8 @@ class _PowerButton extends StatelessWidget {
                 children: [
                   if (busy)
                     const SizedBox(
-                      width: 38,
-                      height: 38,
+                      width: 30,
+                      height: 30,
                       child: CircularProgressIndicator(
                         strokeWidth: 3,
                         color: Colors.white,
@@ -370,19 +374,19 @@ class _PowerButton extends StatelessWidget {
                   else
                     const Icon(
                       Icons.power_settings_new_rounded,
-                      size: 40,
+                      size: 32,
                       color: Colors.white70,
                     ),
-                  const SizedBox(height: 12),
+                  const SizedBox(height: 6),
                   Text(
                     busy
-                        ? '正在连接'
+                        ? (disconnecting ? '正在断开' : '正在连接')
                         : connected
                         ? '已连接'
                         : '点击加速',
                     style: TextStyle(
                       color: connected ? const Color(0xFF58F0C0) : Colors.white,
-                      fontSize: 17,
+                      fontSize: 14,
                       fontWeight: FontWeight.w700,
                     ),
                   ),
@@ -416,7 +420,7 @@ class _TrafficSummary extends StatelessWidget {
     }
     return Container(
       width: double.infinity,
-      padding: const EdgeInsets.symmetric(vertical: 15, horizontal: 10),
+      padding: const EdgeInsets.symmetric(vertical: 11, horizontal: 10),
       decoration: BoxDecoration(
         color: Colors.white,
         borderRadius: BorderRadius.circular(8),
@@ -480,8 +484,8 @@ class _SpeedCard extends StatelessWidget {
   final int bytesPerSecond;
   @override
   Widget build(BuildContext context) => Container(
-    height: 94,
-    padding: const EdgeInsets.symmetric(horizontal: 16),
+    height: 76,
+    padding: const EdgeInsets.symmetric(horizontal: 12),
     decoration: BoxDecoration(
       color: Colors.white,
       borderRadius: BorderRadius.circular(8),
@@ -490,8 +494,8 @@ class _SpeedCard extends StatelessWidget {
     child: Row(
       children: [
         Container(
-          width: 48,
-          height: 48,
+          width: 40,
+          height: 40,
           decoration: BoxDecoration(color: color, shape: BoxShape.circle),
           child: Icon(icon, color: Colors.white),
         ),

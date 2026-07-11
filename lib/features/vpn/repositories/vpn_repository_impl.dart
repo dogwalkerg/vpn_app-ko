@@ -235,7 +235,9 @@ class VpnRepositoryImpl implements VpnRepository {
     final config = (jsonDecode(source) as Map).cast<String, dynamic>();
     config['dns'] = {
       'queryStrategy': 'UseIP',
-      'servers': ['https://1.1.1.1/dns-query', 'https://8.8.8.8/dns-query'],
+      // The plugin also passes these values to VpnService.addDnsServer,
+      // which accepts literal IP addresses only.
+      'servers': ['1.1.1.1', '8.8.8.8'],
     };
     final routing =
         (config['routing'] as Map?)?.cast<String, dynamic>() ??
