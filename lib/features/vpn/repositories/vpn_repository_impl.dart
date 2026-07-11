@@ -1,5 +1,6 @@
 // lib/features/vpn/repositories/vpn_repository_impl.dart
 import 'dart:async';
+import 'dart:convert';
 import 'dart:io'
     show Directory, File, Platform, Process, ProcessSignal, ProcessStartMode;
 import 'dart:math' as math;
@@ -29,6 +30,7 @@ class VpnRepositoryImpl implements VpnRepository {
   final VpnChannel _vpn = VpnChannel();
   FlutterV2ray? _v2ray;
   bool _v2rayConnected = false;
+  Completer<void>? _v2rayReady;
   Process? _clashProcess;
   bool _clashAttached = false;
   Future<void>? _coreDownload;
@@ -155,6 +157,7 @@ class VpnRepositoryImpl implements VpnRepository {
       }
       _clashProcess = null;
       _clashAttached = false;
+      await _waitForClashStopped();
       return;
     }
     if (_v2ray != null) {
@@ -170,7 +173,12 @@ class VpnRepositoryImpl implements VpnRepository {
     if (_clashProcess != null) return true;
     if (Platform.isWindows || Platform.isMacOS) {
       _clashAttached = await _isClashRunning();
-      if (_clashAttached) return true;
+      if (_clashAttached) {
+        final usable = await _verifyDesktopProxy();
+        if (usable) return true;
+        await _setDesktopProxy(false);
+        _clashAttached = false;
+      }
     }
     if (_v2rayConnected) return true;
     final s = await _vpn.stage();
@@ -184,13 +192,17 @@ class VpnRepositoryImpl implements VpnRepository {
     final engine = _v2ray ??= FlutterV2ray(
       onStatusChanged: (status) {
         final state = status.state.toUpperCase();
-        _v2rayConnected = state.contains('CONNECTED');
+        _v2rayConnected = state == 'CONNECTED';
+        if (_v2rayConnected && !(_v2rayReady?.isCompleted ?? true)) {
+          _v2rayReady!.complete();
+        }
       },
     );
     await engine.initializeV2Ray();
     final allowed = await engine.requestPermission();
     if (!allowed) throw Exception('未获得 VPN 权限');
     final parser = FlutterV2ray.parseFromURL(node.raw);
+    _v2rayReady = Completer<void>();
     await engine.startV2Ray(
       remark: parser.remark,
       config: parser.getFullConfiguration(),
@@ -198,15 +210,30 @@ class VpnRepositoryImpl implements VpnRepository {
       bypassSubnets: null,
       proxyOnly: false,
     );
-    _v2rayConnected = true;
+    try {
+      await _v2rayReady!.future.timeout(const Duration(seconds: 20));
+    } on TimeoutException {
+      await engine.stopV2Ray();
+      _v2rayConnected = false;
+      throw Exception('代理核心启动超时，请更换节点后重试');
+    }
   }
 
   Future<void> _connectClash(SubscriptionNode node) async {
     if (await _isClashRunning()) {
-      await _selectClashNode(node);
-      await _setDesktopProxy(true);
-      _clashAttached = true;
-      return;
+      var attached = false;
+      try {
+        await _selectClashNode(node);
+        await _setDesktopProxy(true);
+        if (await _verifyDesktopProxy()) {
+          _clashAttached = true;
+          attached = true;
+        }
+      } catch (_) {
+        // The existing process may have loaded an older subscription.
+      }
+      if (attached) return;
+      await disconnect();
     }
     final support = await getApplicationSupportDirectory();
     final directory = Directory(
@@ -226,7 +253,7 @@ class VpnRepositoryImpl implements VpnRepository {
       '${directory.path}${Platform.pathSeparator}config.yaml',
     ).writeAsString(yaml);
 
-    final coreName = Platform.isWindows ? 'Clash-Coco.exe' : 'Clash-Coco';
+    final coreName = Platform.isWindows ? 'FreedomCore.exe' : 'FreedomCore';
     final core = File('${directory.path}${Platform.pathSeparator}$coreName');
     await _ensureDesktopCore(core);
     if (Platform.isMacOS) await Process.run('chmod', ['+x', core.path]);
@@ -239,8 +266,12 @@ class VpnRepositoryImpl implements VpnRepository {
     ], mode: ProcessStartMode.detachedWithStdio);
     await Future.delayed(const Duration(milliseconds: 800));
     await _selectClashNode(node);
-    _clashAttached = true;
     await _setDesktopProxy(true);
+    if (!await _verifyDesktopProxy()) {
+      await disconnect();
+      throw Exception('所选节点无法访问网络，请更换节点');
+    }
+    _clashAttached = true;
   }
 
   Future<bool> _isClashRunning() async {
@@ -255,11 +286,50 @@ class VpnRepositoryImpl implements VpnRepository {
     }
   }
 
+  Future<void> _waitForClashStopped() async {
+    final deadline = DateTime.now().add(const Duration(seconds: 5));
+    while (DateTime.now().isBefore(deadline)) {
+      if (!await _isClashRunning()) return;
+      await Future.delayed(const Duration(milliseconds: 150));
+    }
+  }
+
   Future<void> _selectClashNode(SubscriptionNode node) async {
     await Dio().put(
       'http://127.0.0.1:9090/proxies/Proxy',
       data: {'name': node.name},
     );
+  }
+
+  Future<bool> _verifyDesktopProxy() async {
+    if (!Platform.isWindows && !Platform.isMacOS) return false;
+    Process? process;
+    try {
+      process = await Process.start(
+        Platform.isWindows ? 'curl.exe' : '/usr/bin/curl',
+        [
+          '--silent',
+          '--show-error',
+          '--max-time',
+          '10',
+          '--proxy',
+          'http://127.0.0.1:7890',
+          'https://www.cloudflare.com/cdn-cgi/trace',
+        ],
+      );
+      final output = process.stdout.transform(utf8.decoder).join();
+      final exitCode = await process.exitCode.timeout(
+        const Duration(seconds: 12),
+        onTimeout: () {
+          process?.kill();
+          return -1;
+        },
+      );
+      return exitCode == 0 && (await output).contains('ip=');
+    } catch (_) {
+      process?.kill();
+      return false;
+    }
   }
 
   Future<({String url, String sha256})> _desktopCoreInfo() async {
@@ -357,6 +427,13 @@ class VpnRepositoryImpl implements VpnRepository {
         'InetCpl.cpl,ClearMyTracksByProcess',
         '8',
       ]);
+      await Process.run('netsh', [
+        'winhttp',
+        enabled ? 'set' : 'reset',
+        'proxy',
+        if (enabled) '127.0.0.1:7890',
+      ]);
+      await _notifyWindowsProxyChanged();
       return;
     }
     if (Platform.isMacOS) {
@@ -396,6 +473,27 @@ class VpnRepositoryImpl implements VpnRepository {
         }
       }
     }
+  }
+
+  Future<void> _notifyWindowsProxyChanged() async {
+    const script = r'''
+Add-Type @'
+using System;
+using System.Runtime.InteropServices;
+public static class WinInetSettings {
+  [DllImport("wininet.dll", SetLastError = true)]
+  public static extern bool InternetSetOption(IntPtr hInternet, int option, IntPtr buffer, int length);
+}
+'@
+[WinInetSettings]::InternetSetOption([IntPtr]::Zero, 39, [IntPtr]::Zero, 0) | Out-Null
+[WinInetSettings]::InternetSetOption([IntPtr]::Zero, 37, [IntPtr]::Zero, 0) | Out-Null
+''';
+    await Process.run('powershell.exe', [
+      '-NoProfile',
+      '-NonInteractive',
+      '-Command',
+      script,
+    ]);
   }
 
   // --- helpers ---------------------------------------------------------------
