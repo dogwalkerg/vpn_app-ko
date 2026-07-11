@@ -36,6 +36,7 @@ dependencies:
   connectivity_plus: ^6.1.5
   shared_preferences: ^2.5.3
   app_links: ^6.4.0
+  crypto: ^3.0.6
 
 dev_dependencies:
   flutter_launcher_icons: ^0.14.4
@@ -71,6 +72,3 @@ flutter:
     - assets/background_vpn.png
     - assets/icons/about_icon.png
     - assets/icons/icon_512x512.png
-    - assets/cores/windows/Clash-Coco.exe
-    - assets/cores/macos-x64/Clash-Coco
-    - assets/cores/macos-arm64/Clash-Coco

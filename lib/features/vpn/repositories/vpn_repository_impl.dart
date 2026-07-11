@@ -6,7 +6,7 @@ import 'dart:math' as math;
 
 import 'package:dio/dio.dart';
 import 'package:path_provider/path_provider.dart';
-import 'package:flutter/services.dart' show rootBundle;
+import 'package:crypto/crypto.dart' show sha256;
 import 'package:vpn_app/features/vpn/mappers/vpn_mapper.dart';
 import 'package:vpn_app/features/vpn/models/dto/vpn_config_dto.dart';
 import 'package:vpn_app/features/vpn/models/vpn_config.dart';
@@ -210,11 +210,9 @@ class VpnRepositoryImpl implements VpnRepository {
       '${directory.path}${Platform.pathSeparator}config.yaml',
     ).writeAsString(yaml);
 
-    final asset = await _desktopCoreAsset();
     final coreName = Platform.isWindows ? 'Clash-Coco.exe' : 'Clash-Coco';
     final core = File('${directory.path}${Platform.pathSeparator}$coreName');
-    final bytes = await rootBundle.load(asset);
-    await core.writeAsBytes(bytes.buffer.asUint8List(), flush: true);
+    await _ensureDesktopCore(core);
     if (Platform.isMacOS) await Process.run('chmod', ['+x', core.path]);
 
     _clashProcess = await Process.start(core.path, [
@@ -231,13 +229,48 @@ class VpnRepositoryImpl implements VpnRepository {
     await _setDesktopProxy(true);
   }
 
-  Future<String> _desktopCoreAsset() async {
-    if (Platform.isWindows) return 'assets/cores/windows/Clash-Coco.exe';
+  Future<({String url, String sha256})> _desktopCoreInfo() async {
+    if (Platform.isWindows) {
+      return (
+        url: 'https://r2.xsh.ccwu.cc/vpn-cores/windows/Clash-Coco.exe',
+        sha256:
+            '58a8136fdb87d4eee7e3518041b0769cc5e673a7ca98dfc030f99a47ff49588f',
+      );
+    }
     final result = await Process.run('uname', ['-m']);
     final arm = result.stdout.toString().trim().contains('arm64');
     return arm
-        ? 'assets/cores/macos-arm64/Clash-Coco'
-        : 'assets/cores/macos-x64/Clash-Coco';
+        ? (
+            url: 'https://r2.xsh.ccwu.cc/vpn-cores/macos-arm64/Clash-Coco',
+            sha256:
+                'f60287548ee629a2cc6dce24d7dc654d7d3b6c37fe3ecdd43e897760707b33ec',
+          )
+        : (
+            url: 'https://r2.xsh.ccwu.cc/vpn-cores/macos-x64/Clash-Coco',
+            sha256:
+                '06697ede7893eba69388114045b365ff465bfbd4213b77a3880d99266705dfab',
+          );
+  }
+
+  Future<void> _ensureDesktopCore(File core) async {
+    final info = await _desktopCoreInfo();
+    if (await core.exists() && await _fileSha256(core) == info.sha256) return;
+
+    final partial = File('${core.path}.download');
+    if (await partial.exists()) await partial.delete();
+    await Dio().download(info.url, partial.path);
+    final actual = await _fileSha256(partial);
+    if (actual != info.sha256) {
+      await partial.delete();
+      throw Exception('代理核心校验失败');
+    }
+    if (await core.exists()) await core.delete();
+    await partial.rename(core.path);
+  }
+
+  Future<String> _fileSha256(File file) async {
+    final digest = await sha256.bind(file.openRead()).first;
+    return digest.toString();
   }
 
   Future<void> _setDesktopProxy(bool enabled) async {
