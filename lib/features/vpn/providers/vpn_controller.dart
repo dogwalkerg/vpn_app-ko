@@ -9,26 +9,42 @@ import '../usecases/connect_vpn_usecase.dart';
 import '../usecases/disconnect_vpn_usecase.dart';
 import '../usecases/is_connected_usecase.dart';
 
-sealed class VpnState { const VpnState(); }
-class VpnIdle extends VpnState { const VpnIdle(); }
-class VpnConnecting extends VpnState { const VpnConnecting(); }
-class VpnConnected extends VpnState { const VpnConnected(); }
-class VpnDisconnecting extends VpnState { const VpnDisconnecting(); }
+sealed class VpnState {
+  const VpnState();
+}
+
+class VpnIdle extends VpnState {
+  const VpnIdle();
+}
+
+class VpnConnecting extends VpnState {
+  const VpnConnecting();
+}
+
+class VpnConnected extends VpnState {
+  const VpnConnected();
+}
+
+class VpnDisconnecting extends VpnState {
+  const VpnDisconnecting();
+}
+
 class VpnError extends VpnState {
   final String message;
   const VpnError(this.message);
 }
 
-final vpnControllerProvider =
-  StateNotifierProvider<VpnController, VpnState>((ref) {
-    final ctrl = VpnController(
-      connect: ref.watch(connectVpnUseCaseProvider),
-      disconnect: ref.watch(disconnectVpnUseCaseProvider),
-      isConnected: ref.watch(isVpnConnectedUseCaseProvider),
-      ref: ref,
-    );
-    return ctrl;
-  }, name: 'vpnController');
+final vpnControllerProvider = StateNotifierProvider<VpnController, VpnState>((
+  ref,
+) {
+  final ctrl = VpnController(
+    connect: ref.watch(connectVpnUseCaseProvider),
+    disconnect: ref.watch(disconnectVpnUseCaseProvider),
+    isConnected: ref.watch(isVpnConnectedUseCaseProvider),
+    ref: ref,
+  );
+  return ctrl;
+}, name: 'vpnController');
 
 class VpnController extends StateNotifier<VpnState> {
   VpnController({
@@ -36,7 +52,7 @@ class VpnController extends StateNotifier<VpnState> {
     required this.disconnect,
     required this.isConnected,
     required this.ref,
-  }) : super(const VpnIdle()){
+  }) : super(const VpnIdle()) {
     unawaited(bootstrap());
 
     ref.listen<bool>(vpnAccessProvider, (prev, next) async {
@@ -45,8 +61,7 @@ class VpnController extends StateNotifier<VpnState> {
       }
     });
 
-    _vpnSub = VpnChannel()
-        .onStatus
+    _vpnSub = VpnChannel().onStatus
         .distinct((a, b) => a.stage == b.stage)
         .listen(_onVpnStatus);
 
@@ -65,8 +80,7 @@ class VpnController extends StateNotifier<VpnState> {
     try {
       final c = await isConnected();
       state = c ? const VpnConnected() : const VpnIdle();
-    } catch (_) {
-    }
+    } catch (_) {}
   }
 
   bool get _canUseVpn => ref.read(vpnAccessProvider);
@@ -118,6 +132,8 @@ class VpnController extends StateNotifier<VpnState> {
     });
     try {
       await connect();
+      _connectTimeout?.cancel();
+      state = const VpnConnected();
     } catch (e) {
       _connectTimeout?.cancel();
       state = VpnError(presentableError(e));
@@ -130,6 +146,7 @@ class VpnController extends StateNotifier<VpnState> {
     state = const VpnDisconnecting();
     try {
       await disconnect();
+      state = const VpnIdle();
     } catch (e) {
       state = VpnError(presentableError(e));
     }

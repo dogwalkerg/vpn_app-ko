@@ -1,4 +1,4 @@
-﻿// lib/features/vpn/screens/vpn_screen.dart
+// lib/features/vpn/screens/vpn_screen.dart
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:vpn_app/core/extensions/context_ext.dart';
@@ -65,7 +65,10 @@ class VpnScreen extends ConsumerWidget {
                 padding: t.spacing.all(t.spacing.md),
                 child: Text(
                   error,
-                  style: t.typography.body.copyWith(color: c.danger, fontWeight: FontWeight.w600),
+                  style: t.typography.body.copyWith(
+                    color: c.danger,
+                    fontWeight: FontWeight.w600,
+                  ),
                 ),
               ),
             Expanded(
@@ -87,24 +90,17 @@ class VpnScreen extends ConsumerWidget {
   }
 }
 
-class _NodeList extends StatefulWidget {
+class _NodeList extends ConsumerWidget {
   final List<SubscriptionNode> nodes;
 
   const _NodeList({required this.nodes});
 
   @override
-  State<_NodeList> createState() => _NodeListState();
-}
-
-class _NodeListState extends State<_NodeList> {
-  int selected = 0;
-
-  @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
     final t = context.tokens;
     final c = context.colors;
 
-    if (widget.nodes.isEmpty) {
+    if (nodes.isEmpty) {
       return Center(
         child: Text(
           '暂无节点',
@@ -115,15 +111,17 @@ class _NodeListState extends State<_NodeList> {
 
     return ListView.separated(
       padding: EdgeInsets.fromLTRB(t.spacing.md, 0, t.spacing.md, t.spacing.lg),
-      itemCount: widget.nodes.length,
+      itemCount: nodes.length,
       separatorBuilder: (_, __) => SizedBox(height: t.spacing.sm),
       itemBuilder: (context, index) {
-        final node = widget.nodes[index];
+        final node = nodes[index];
+        final selected = ref.watch(selectedSubscriptionNodeProvider);
         return _NodeTile(
           node: node,
           index: index + 1,
-          selected: selected == index,
-          onTap: () => setState(() => selected = index),
+          selected: selected?.raw == node.raw,
+          onTap: () =>
+              ref.read(selectedSubscriptionNodeProvider.notifier).state = node,
         );
       },
     );
@@ -153,13 +151,23 @@ class _NodeTile extends StatelessWidget {
       onTap: onTap,
       child: AnimatedContainer(
         duration: const Duration(milliseconds: 160),
-        padding: EdgeInsets.symmetric(horizontal: t.spacing.md, vertical: t.spacing.sm),
+        padding: EdgeInsets.symmetric(
+          horizontal: t.spacing.md,
+          vertical: t.spacing.sm,
+        ),
         decoration: BoxDecoration(
           color: selected ? const Color(0xFF4B4B4B) : const Color(0xFF3E3E3E),
           borderRadius: BorderRadius.circular(8),
-          border: Border.all(color: selected ? c.primary : Colors.transparent, width: 1),
+          border: Border.all(
+            color: selected ? c.primary : Colors.transparent,
+            width: 1,
+          ),
           boxShadow: const [
-            BoxShadow(color: Color(0x66000000), blurRadius: 8, offset: Offset(0, 4)),
+            BoxShadow(
+              color: Color(0x66000000),
+              blurRadius: 8,
+              offset: Offset(0, 4),
+            ),
           ],
         ),
         child: Row(
@@ -184,7 +192,10 @@ class _NodeTile extends StatelessWidget {
                     node.country,
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
-                    style: t.typography.body.copyWith(color: Colors.white, fontWeight: FontWeight.w700),
+                    style: t.typography.body.copyWith(
+                      color: Colors.white,
+                      fontWeight: FontWeight.w700,
+                    ),
                   ),
                   SizedBox(height: t.spacing.xs * 0.5),
                   Row(
@@ -196,7 +207,9 @@ class _NodeTile extends StatelessWidget {
                           '${node.speedMbps.toStringAsFixed(1)} Mbps',
                           maxLines: 1,
                           overflow: TextOverflow.ellipsis,
-                          style: t.typography.caption.copyWith(color: const Color(0xFFC9C9C9)),
+                          style: t.typography.caption.copyWith(
+                            color: const Color(0xFFC9C9C9),
+                          ),
                         ),
                       ),
                     ],
@@ -207,7 +220,10 @@ class _NodeTile extends StatelessWidget {
             SizedBox(width: t.spacing.sm),
             Text(
               '$index',
-              style: t.typography.caption.copyWith(color: const Color(0xFFC9C9C9), fontWeight: FontWeight.w700),
+              style: t.typography.caption.copyWith(
+                color: const Color(0xFFC9C9C9),
+                fontWeight: FontWeight.w700,
+              ),
             ),
             SizedBox(width: t.spacing.xs),
             Icon(Icons.groups_rounded, color: c.info, size: 17),
@@ -217,5 +233,3 @@ class _NodeTile extends StatelessWidget {
     );
   }
 }
-
-
