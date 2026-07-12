@@ -4,7 +4,6 @@ import android.app.Service;
 import android.content.Intent;
 import android.net.LocalSocket;
 import android.net.LocalSocketAddress;
-import android.net.ProxyInfo;
 import android.net.VpnService;
 import android.os.Build;
 import android.os.ParcelFileDescriptor;
@@ -21,6 +20,7 @@ import org.json.JSONObject;
 
 import java.io.File;
 import java.io.FileDescriptor;
+import java.io.InputStream;
 import java.io.OutputStream;
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -96,7 +96,7 @@ public class V2rayVPNService extends VpnService implements V2rayServicesListener
         }
         Builder builder = new Builder();
         builder.setSession(v2rayConfig.REMARK);
-        builder.setMtu(1500);
+        builder.setMtu(1280);
         builder.addAddress("26.26.26.1", 30);
 
         if (v2rayConfig.BYPASS_SUBNETS == null || v2rayConfig.BYPASS_SUBNETS.isEmpty()) {
@@ -138,10 +138,6 @@ public class V2rayVPNService extends VpnService implements V2rayServicesListener
         }
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
             builder.setMetered(false);
-            builder.setHttpProxy(ProxyInfo.buildDirectProxy(
-                    "127.0.0.1",
-                    10809,
-                    Arrays.asList("localhost", "127.*", "10.*", "192.168.*", "172.16.*")));
         }
 
         try {
@@ -155,21 +151,35 @@ public class V2rayVPNService extends VpnService implements V2rayServicesListener
     }
 
     private void runTun2socks() {
+        File socketFile = new File(getApplicationContext().getFilesDir(), "sock_path");
+        if (socketFile.exists() && !socketFile.delete()) {
+            Log.w("VPN_SERVICE", "Unable to remove stale tun2socks socket");
+        }
         ArrayList<String> cmd = new ArrayList<>(Arrays.asList(new File(getApplicationInfo().nativeLibraryDir, "libtun2socks.so").getAbsolutePath(),
                 "--netif-ipaddr", "26.26.26.2",
                 "--netif-netmask", "255.255.255.252",
                 "--socks-server-addr", "127.0.0.1:" + v2rayConfig.LOCAL_SOCKS5_PORT,
-                "--tunmtu", "1500",
+                "--tunmtu", "1280",
                 "--sock-path", "sock_path",
                 "--enable-udprelay",
                 "--loglevel", "error"));
         try {
             ProcessBuilder processBuilder = new ProcessBuilder(cmd);
             processBuilder.redirectErrorStream(true);
-            process = processBuilder.directory(getApplicationContext().getFilesDir()).start();
+            final Process startedProcess = processBuilder.directory(getApplicationContext().getFilesDir()).start();
+            process = startedProcess;
+            new Thread(() -> {
+                try (InputStream input = startedProcess.getInputStream()) {
+                    byte[] buffer = new byte[1024];
+                    while (input.read(buffer) != -1) {
+                        // Drain native output so the process cannot block on a full pipe.
+                    }
+                } catch (Exception ignored) {
+                }
+            }, "Tun2socks_Log_Thread").start();
             new Thread(() -> {
                 try {
-                    process.waitFor();
+                    startedProcess.waitFor();
                     if (isRunning) {
                         runTun2socks();
                     }
@@ -208,7 +218,11 @@ public class V2rayVPNService extends VpnService implements V2rayServicesListener
                     break;
                 } catch (Exception e) {
                     Log.e(V2rayVPNService.class.getSimpleName(), "sendFd failed =>", e);
-                    if (tries > 5) break;
+                    if (tries > 20) {
+                        Log.e(V2rayVPNService.class.getSimpleName(), "Unable to send VPN file descriptor to tun2socks");
+                        stopAllProcess();
+                        break;
+                    }
                     tries += 1;
                 }
             }

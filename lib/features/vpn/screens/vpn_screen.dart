@@ -29,6 +29,7 @@ class VpnScreen extends ConsumerStatefulWidget {
 class _VpnScreenState extends ConsumerState<VpnScreen> {
   Timer? _timer;
   Timer? _subscriptionRefreshTimer;
+  int _tabIndex = 0;
   DateTime? _connectedAt;
   Duration _connectedFor = Duration.zero;
   WebSocket? _trafficSocket;
@@ -156,120 +157,108 @@ class _VpnScreenState extends ConsumerState<VpnScreen> {
       ),
       drawer: const AppDrawer(),
       bottomNavigationBar: _BottomNavigation(
-        onHome: () {},
-        onNodes: () => _openNodePicker(context),
-        onSettings: () => _openSettings(context),
+        selectedIndex: _tabIndex,
+        onHome: () => setState(() => _tabIndex = 0),
+        onNodes: () => setState(() => _tabIndex = 1),
+        onSettings: () => setState(() => _tabIndex = 2),
       ),
-      body: SafeArea(
-        child: LayoutBuilder(
-          builder: (context, constraints) => SingleChildScrollView(
-            padding: const EdgeInsets.fromLTRB(18, 6, 18, 12),
-            child: Center(
-              child: ConstrainedBox(
-                constraints: const BoxConstraints(maxWidth: 620),
-                child: Column(
-                  children: [
-                    _CurrentNodeCard(
-                      node: selected,
-                      loading: nodes.isLoading || nodesRefreshing,
-                      onTap: () =>
-                          nodes.whenData((items) => _openNodePicker(context)),
-                      onRefresh: _refreshNodes,
-                    ),
-                    const SizedBox(height: 12),
-                    _PowerButton(
-                      connected: connected,
-                      busy: busy,
-                      disconnecting: disconnecting,
-                      enabled: allowed && selected != null,
-                      onPressed: () async {
-                        final controller = ref.read(
-                          vpnControllerProvider.notifier,
-                        );
-                        connected
-                            ? await controller.disconnectPressed()
-                            : await controller.connectPressed();
-                      },
-                    ),
-                    const SizedBox(height: 10),
-                    const Text(
-                      '连接时长',
-                      style: TextStyle(color: Color(0xFF8B909A), fontSize: 16),
-                    ),
-                    const SizedBox(height: 6),
-                    Text(
-                      _durationText(_connectedFor),
-                      style: const TextStyle(
-                        fontSize: 30,
-                        fontWeight: FontWeight.w700,
-                        letterSpacing: 0,
-                      ),
-                    ),
-                    const SizedBox(height: 10),
-                    _TrafficSummary(subscription: subscription),
-                    const SizedBox(height: 8),
-                    Row(
+      body: IndexedStack(
+        index: _tabIndex,
+        children: [
+          SafeArea(
+            child: LayoutBuilder(
+              builder: (context, constraints) => SingleChildScrollView(
+                padding: const EdgeInsets.fromLTRB(16, 6, 16, 12),
+                child: Center(
+                  child: ConstrainedBox(
+                    constraints: const BoxConstraints(maxWidth: 620),
+                    child: Column(
                       children: [
-                        Expanded(
-                          child: _SpeedCard(
-                            icon: Icons.arrow_downward_rounded,
-                            label: '下载',
-                            color: const Color(0xFF5966D9),
-                            bytesPerSecond: _downloadSpeed,
+                        _CurrentNodeCard(
+                          node: selected,
+                          loading: nodes.isLoading || nodesRefreshing,
+                          onTap: () => setState(() => _tabIndex = 1),
+                          onRefresh: _refreshNodes,
+                        ),
+                        const SizedBox(height: 6),
+                        _PowerButton(
+                          connected: connected,
+                          busy: busy,
+                          disconnecting: disconnecting,
+                          enabled: allowed && selected != null,
+                          onPressed: () async {
+                            final controller = ref.read(
+                              vpnControllerProvider.notifier,
+                            );
+                            connected
+                                ? await controller.disconnectPressed()
+                                : await controller.connectPressed();
+                          },
+                        ),
+                        const SizedBox(height: 4),
+                        const Text(
+                          '连接时长',
+                          style: TextStyle(
+                            color: Color(0xFF8B909A),
+                            fontSize: 13,
                           ),
                         ),
-                        const SizedBox(width: 12),
-                        Expanded(
-                          child: _SpeedCard(
-                            icon: Icons.arrow_upward_rounded,
-                            label: '上传',
-                            color: const Color(0xFF29B765),
-                            bytesPerSecond: _uploadSpeed,
+                        const SizedBox(height: 4),
+                        Text(
+                          _durationText(_connectedFor),
+                          style: const TextStyle(
+                            fontSize: 38,
+                            fontWeight: FontWeight.w700,
+                            letterSpacing: 0,
                           ),
                         ),
+                        const SizedBox(height: 8),
+                        _TrafficSummary(subscription: subscription),
+                        const SizedBox(height: 8),
+                        Row(
+                          children: [
+                            Expanded(
+                              child: _SpeedCard(
+                                icon: Icons.arrow_downward_rounded,
+                                label: '下载',
+                                color: const Color(0xFF5966D9),
+                                bytesPerSecond: _downloadSpeed,
+                              ),
+                            ),
+                            const SizedBox(width: 12),
+                            Expanded(
+                              child: _SpeedCard(
+                                icon: Icons.arrow_upward_rounded,
+                                label: '上传',
+                                color: const Color(0xFF29B765),
+                                bytesPerSecond: _uploadSpeed,
+                              ),
+                            ),
+                          ],
+                        ),
+                        if (error != null) ...[
+                          const SizedBox(height: 14),
+                          Text(
+                            error,
+                            textAlign: TextAlign.center,
+                            style: const TextStyle(
+                              color: Color(0xFFD14343),
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
+                        ],
                       ],
                     ),
-                    if (error != null) ...[
-                      const SizedBox(height: 14),
-                      Text(
-                        error,
-                        textAlign: TextAlign.center,
-                        style: const TextStyle(
-                          color: Color(0xFFD14343),
-                          fontWeight: FontWeight.w600,
-                        ),
-                      ),
-                    ],
-                  ],
+                  ),
                 ),
               ),
             ),
           ),
-        ),
-      ),
-    );
-  }
-
-  Future<void> _openNodePicker(BuildContext context) {
-    return showModalBottomSheet<void>(
-      context: context,
-      isScrollControlled: true,
-      useSafeArea: true,
-      backgroundColor: const Color(0xFFF4F5F9),
-      builder: (_) =>
-          FractionallySizedBox(heightFactor: .94, child: const _NodePicker()),
-    );
-  }
-
-  Future<void> _openSettings(BuildContext context) {
-    return showModalBottomSheet<void>(
-      context: context,
-      isScrollControlled: true,
-      useSafeArea: true,
-      backgroundColor: const Color(0xFFF4F5F9),
-      builder: (_) => const FractionallySizedBox(
-        heightFactor: .94,
-        child: _SettingsPanel(),
+          SafeArea(
+            child: _NodePicker(onSelected: () => setState(() => _tabIndex = 0)),
+          ),
+          const SafeArea(child: _SettingsPanel()),
+        ],
       ),
     );
   }
@@ -288,67 +277,70 @@ class _CurrentNodeCard extends StatelessWidget {
   final VoidCallback onRefresh;
 
   @override
-  Widget build(BuildContext context) => Material(
-    color: Colors.white,
-    elevation: 2,
-    shadowColor: Colors.black26,
-    borderRadius: BorderRadius.circular(8),
-    child: InkWell(
-      onTap: onTap,
+  Widget build(BuildContext context) => SizedBox(
+    height: 64,
+    child: Material(
+      color: Colors.white,
+      elevation: 2,
+      shadowColor: Colors.black26,
       borderRadius: BorderRadius.circular(8),
-      child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-        child: Row(
-          children: [
-            Container(
-              width: 42,
-              height: 42,
-              alignment: Alignment.center,
-              decoration: const BoxDecoration(
-                color: Color(0xFFF0F2F7),
-                shape: BoxShape.circle,
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(8),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 16),
+          child: Row(
+            children: [
+              Container(
+                width: 42,
+                height: 42,
+                alignment: Alignment.center,
+                decoration: const BoxDecoration(
+                  color: Color(0xFFF0F2F7),
+                  shape: BoxShape.circle,
+                ),
+                child: const Icon(
+                  Icons.public_rounded,
+                  color: Color(0xFF168FD5),
+                  size: 27,
+                ),
               ),
-              child: const Icon(
-                Icons.public_rounded,
-                color: Color(0xFF168FD5),
-                size: 27,
-              ),
-            ),
-            const SizedBox(width: 14),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    node?.name ?? (loading ? '正在获取线路' : '智能选择'),
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: const TextStyle(
-                      color: Color(0xFF15171A),
-                      fontSize: 18,
-                      fontWeight: FontWeight.w700,
+              const SizedBox(width: 14),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      node?.name ?? (loading ? '正在获取线路' : '智能选择'),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(
+                        color: Color(0xFF15171A),
+                        fontSize: 15,
+                        fontWeight: FontWeight.w700,
+                      ),
                     ),
-                  ),
-                  const SizedBox(height: 5),
-                  Text(
-                    node == null ? '选择可用线路' : '${node!.host}:${node!.port}',
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: const TextStyle(
-                      color: Color(0xFF747A84),
-                      fontSize: 12,
+                    const SizedBox(height: 2),
+                    Text(
+                      node == null ? '选择可用线路' : '${node!.host}:${node!.port}',
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(
+                        color: Color(0xFF747A84),
+                        fontSize: 12,
+                      ),
                     ),
-                  ),
-                ],
+                  ],
+                ),
               ),
-            ),
-            IconButton(
-              tooltip: '刷新订阅',
-              onPressed: onRefresh,
-              icon: const Icon(Icons.refresh_rounded),
-            ),
-            const Icon(Icons.chevron_right_rounded, color: Color(0xFF7A8089)),
-          ],
+              IconButton(
+                tooltip: '刷新订阅',
+                onPressed: onRefresh,
+                icon: const Icon(Icons.refresh_rounded),
+              ),
+              const Icon(Icons.chevron_right_rounded, color: Color(0xFF7A8089)),
+            ],
+          ),
         ),
       ),
     ),
@@ -371,18 +363,30 @@ class _PowerButton extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) => SizedBox(
-    width: 160,
-    height: 160,
-    child: DecoratedBox(
-      decoration: BoxDecoration(
-        shape: BoxShape.circle,
-        color: const Color(0xFFE9EDF7),
-        border: Border.all(color: const Color(0xFFDDE3F0), width: 9),
-      ),
-      child: Center(
-        child: Container(
-          width: 104,
-          height: 104,
+    width: 240,
+    height: 240,
+    child: Stack(
+      alignment: Alignment.center,
+      children: [
+        Container(
+          width: 240,
+          height: 240,
+          decoration: const BoxDecoration(
+            shape: BoxShape.circle,
+            color: Color(0xFFE9EDF7),
+          ),
+        ),
+        Container(
+          width: 220,
+          height: 220,
+          decoration: const BoxDecoration(
+            shape: BoxShape.circle,
+            color: Color(0xFFE1E7F3),
+          ),
+        ),
+        Container(
+          width: 178,
+          height: 178,
           decoration: BoxDecoration(
             shape: BoxShape.circle,
             color: connected
@@ -408,8 +412,8 @@ class _PowerButton extends StatelessWidget {
                 children: [
                   if (busy)
                     const SizedBox(
-                      width: 30,
-                      height: 30,
+                      width: 36,
+                      height: 36,
                       child: CircularProgressIndicator(
                         strokeWidth: 3,
                         color: Colors.white,
@@ -418,10 +422,10 @@ class _PowerButton extends StatelessWidget {
                   else
                     const Icon(
                       Icons.power_settings_new_rounded,
-                      size: 32,
+                      size: 36,
                       color: Colors.white70,
                     ),
-                  const SizedBox(height: 6),
+                  const SizedBox(height: 4),
                   Text(
                     busy
                         ? (disconnecting ? '正在断开' : '正在连接')
@@ -430,7 +434,7 @@ class _PowerButton extends StatelessWidget {
                         : '点击加速',
                     style: TextStyle(
                       color: connected ? const Color(0xFF58F0C0) : Colors.white,
-                      fontSize: 14,
+                      fontSize: 13,
                       fontWeight: FontWeight.w700,
                     ),
                   ),
@@ -439,7 +443,7 @@ class _PowerButton extends StatelessWidget {
             ),
           ),
         ),
-      ),
+      ],
     ),
   );
 }
@@ -464,7 +468,8 @@ class _TrafficSummary extends StatelessWidget {
     }
     return Container(
       width: double.infinity,
-      padding: const EdgeInsets.symmetric(vertical: 11, horizontal: 10),
+      height: 58,
+      padding: const EdgeInsets.symmetric(vertical: 5, horizontal: 10),
       decoration: BoxDecoration(
         color: Colors.white,
         borderRadius: BorderRadius.circular(8),
@@ -528,8 +533,8 @@ class _SpeedCard extends StatelessWidget {
   final int bytesPerSecond;
   @override
   Widget build(BuildContext context) => Container(
-    height: 76,
-    padding: const EdgeInsets.symmetric(horizontal: 12),
+    height: 60,
+    padding: const EdgeInsets.symmetric(horizontal: 14),
     decoration: BoxDecoration(
       color: Colors.white,
       borderRadius: BorderRadius.circular(8),
@@ -538,24 +543,31 @@ class _SpeedCard extends StatelessWidget {
     child: Row(
       children: [
         Container(
-          width: 40,
-          height: 40,
+          width: 34,
+          height: 34,
           decoration: BoxDecoration(color: color, shape: BoxShape.circle),
           child: Icon(icon, color: Colors.white),
         ),
-        const SizedBox(width: 12),
+        const SizedBox(width: 10),
         Expanded(
           child: Column(
             mainAxisAlignment: MainAxisAlignment.center,
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Text(label, style: const TextStyle(color: Color(0xFF7B8089))),
+              Text(
+                label,
+                style: const TextStyle(
+                  color: Color(0xFF7B8089),
+                  fontSize: 11,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
               Text(
                 '${_bytes(bytesPerSecond)}/s',
                 maxLines: 1,
                 style: const TextStyle(
                   color: Color(0xFF202226),
-                  fontSize: 17,
+                  fontSize: 13,
                   fontWeight: FontWeight.w700,
                 ),
               ),
@@ -568,7 +580,9 @@ class _SpeedCard extends StatelessWidget {
 }
 
 class _NodePicker extends ConsumerWidget {
-  const _NodePicker();
+  const _NodePicker({required this.onSelected});
+
+  final VoidCallback onSelected;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -680,7 +694,7 @@ class _NodePicker extends ConsumerWidget {
       await ref.read(vpnControllerProvider.notifier).disconnectPressed();
     }
     ref.read(selectedSubscriptionNodeProvider.notifier).state = node;
-    if (context.mounted) Navigator.of(context).pop();
+    if (context.mounted) onSelected();
   }
 }
 
@@ -814,10 +828,12 @@ class _NodeCard extends StatelessWidget {
 
 class _BottomNavigation extends StatelessWidget {
   const _BottomNavigation({
+    required this.selectedIndex,
     required this.onHome,
     required this.onNodes,
     required this.onSettings,
   });
+  final int selectedIndex;
   final VoidCallback onHome;
   final VoidCallback onNodes;
   final VoidCallback onSettings;
@@ -826,7 +842,7 @@ class _BottomNavigation extends StatelessWidget {
   Widget build(BuildContext context) => SafeArea(
     top: false,
     child: Container(
-      height: 62,
+      height: 64,
       decoration: const BoxDecoration(
         color: Color(0xFFF7F7F8),
         border: Border(top: BorderSide(color: Color(0xFFE2E3E7))),
@@ -837,13 +853,19 @@ class _BottomNavigation extends StatelessWidget {
           _NavButton(
             icon: Icons.home_rounded,
             label: '主页',
-            selected: true,
+            selected: selectedIndex == 0,
             onTap: onHome,
           ),
-          _NavButton(icon: Icons.hub_rounded, label: '线路', onTap: onNodes),
+          _NavButton(
+            icon: Icons.hub_rounded,
+            label: '线路',
+            selected: selectedIndex == 1,
+            onTap: onNodes,
+          ),
           _NavButton(
             icon: Icons.settings_rounded,
             label: '设置',
+            selected: selectedIndex == 2,
             onTap: onSettings,
           ),
         ],
@@ -870,7 +892,7 @@ class _NavButton extends StatelessWidget {
     onPressed: onTap,
     icon: Icon(
       icon,
-      size: 27,
+      size: 24,
       color: selected ? const Color(0xFF2D235E) : const Color(0xFF777A80),
     ),
   );
@@ -955,7 +977,6 @@ class _SettingsPanel extends ConsumerWidget {
                 icon: Icons.diamond_rounded,
                 title: '会员中心与续费',
                 onTap: () {
-                  Navigator.pop(context);
                   context.pushNamed(AppRoute.subscription.name);
                 },
               ),
@@ -963,7 +984,6 @@ class _SettingsPanel extends ConsumerWidget {
                 icon: Icons.devices_rounded,
                 title: '设备管理',
                 onTap: () {
-                  Navigator.pop(context);
                   context.pushNamed(AppRoute.devices.name);
                 },
               ),
@@ -1043,7 +1063,6 @@ class _SettingsPanel extends ConsumerWidget {
                 icon: Icons.info_outline_rounded,
                 title: '关于应用',
                 onTap: () {
-                  Navigator.pop(context);
                   context.pushNamed(AppRoute.about.name);
                 },
               ),
@@ -1071,7 +1090,6 @@ class _SettingsPanel extends ConsumerWidget {
                 title: '退出账号',
                 danger: true,
                 onTap: () async {
-                  Navigator.pop(context);
                   await ref.read(authControllerProvider.notifier).logout();
                   if (context.mounted) context.goNamed(AppRoute.login.name);
                 },

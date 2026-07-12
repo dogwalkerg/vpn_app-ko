@@ -5,7 +5,6 @@ import 'dart:io'
     show
         Directory,
         File,
-        HttpClient,
         Platform,
         Process,
         ProcessSignal,
@@ -14,7 +13,6 @@ import 'dart:io'
 import 'dart:math' as math;
 
 import 'package:dio/dio.dart';
-import 'package:dio/io.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:crypto/crypto.dart' show sha256;
 import 'package:vpn_app/features/vpn/mappers/vpn_mapper.dart';
@@ -25,6 +23,7 @@ import 'package:flutter_v2ray/flutter_v2ray.dart';
 
 import '../../../core/api/api_service.dart';
 import '../../../core/errors/error_mapper.dart';
+import '../config/android_v2ray_config.dart';
 import '../platform/vpn_channel.dart';
 import '../platform/vpn_isolates.dart';
 import '../platform/vpn_permissions.dart';
@@ -232,7 +231,7 @@ class VpnRepositoryImpl implements VpnRepository {
     final allowed = await engine.requestPermission();
     if (!allowed) throw Exception('未获得 VPN 权限');
     final parser = FlutterV2ray.parseFromURL(node.raw);
-    final config = _buildAndroidV2rayConfig(parser.getFullConfiguration());
+    final config = buildAndroidV2rayConfig(parser.getFullConfiguration());
     _v2rayReady = Completer<void>();
     await engine.startV2Ray(
       remark: parser.remark,
@@ -288,34 +287,6 @@ class VpnRepositoryImpl implements VpnRepository {
     return result;
   }
 
-  String _buildAndroidV2rayConfig(String source) {
-    final config = (jsonDecode(source) as Map).cast<String, dynamic>();
-    final inbounds = ((config['inbounds'] as List?) ?? const [])
-        .map((item) => (item as Map).cast<String, dynamic>())
-        .toList();
-    inbounds.removeWhere((inbound) => inbound['tag'] == 'http');
-    inbounds.add({
-      'tag': 'http',
-      'protocol': 'http',
-      'listen': '127.0.0.1',
-      'port': 10809,
-      'settings': <String, dynamic>{},
-    });
-    config['inbounds'] = inbounds;
-    config['dns'] = {
-      'queryStrategy': 'UseIP',
-      // The plugin also passes these values to VpnService.addDnsServer,
-      // which accepts literal IP addresses only.
-      'servers': ['1.1.1.1', '8.8.8.8'],
-    };
-    final routing =
-        (config['routing'] as Map?)?.cast<String, dynamic>() ??
-        <String, dynamic>{};
-    routing['domainStrategy'] = 'IPIfNonMatch';
-    config['routing'] = routing;
-    return jsonEncode(config);
-  }
-
   Future<bool> _verifyAndroidProxy() async {
     if (!Platform.isAndroid || !_v2rayConnected) return false;
     final client = Dio(
@@ -327,14 +298,10 @@ class VpnRepositoryImpl implements VpnRepository {
             status != null && status >= 200 && status < 500,
       ),
     );
-    client.httpClientAdapter = IOHttpClientAdapter(
-      createHttpClient: () {
-        final httpClient = HttpClient();
-        httpClient.findProxy = (_) => 'PROXY 127.0.0.1:10809';
-        return httpClient;
-      },
-    );
-    for (final url in const ['https://1.1.1.1/cdn-cgi/trace']) {
+    for (final url in const [
+      'https://www.gstatic.com/generate_204',
+      'https://cp.cloudflare.com/generate_204',
+    ]) {
       try {
         final response = await client.get<void>(url);
         final status = response.statusCode ?? 0;
