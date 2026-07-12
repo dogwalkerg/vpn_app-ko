@@ -10,6 +10,7 @@
     <application
         android:label="自由云"
         android:name="${applicationName}"
+        android:extractNativeLibs="true"
         android:icon="@mipmap/ic_launcher2">
         <activity
             android:name=".MainActivity"

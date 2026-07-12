@@ -45,10 +45,8 @@ android {
 
     buildTypes {
         release {
-            // TODO: Add your own signing config for the release build.
-            // Signing with the debug keys for now, so `flutter run --release` works.
-            // CI does not contain the private release keystore. Fall back to the
-            // standard debug key so release-mode compilation remains verifiable.
+            // CI restores the stable release keystore before building. Keep the
+            // debug fallback so local release-mode compilation still works.
             signingConfig = if (releaseKeystore.exists()) {
                 signingConfigs.getByName("release")
             } else {
@@ -56,6 +54,12 @@ android {
             }
             isMinifyEnabled = false
             isShrinkResources = false
+        }
+    }
+
+    packaging {
+        jniLibs {
+            useLegacyPackaging = true
         }
     }
 }
