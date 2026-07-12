@@ -4,6 +4,7 @@ import 'dart:io';
 import 'package:dio/dio.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:vpn_app/core/api/coco_api.dart';
+import 'package:vpn_app/core/config/app_config.dart';
 import 'package:vpn_app/features/subscription/models/subscription_state.dart';
 import 'package:vpn_app/features/subscription/providers/subscription_providers.dart';
 import 'package:vpn_app/features/vpn/models/subscription_node.dart';
@@ -12,6 +13,8 @@ final selectedSubscriptionNodeProvider = StateProvider<SubscriptionNode?>(
   (ref) => null,
 );
 
+final subscriptionNodesRefreshingProvider = StateProvider<bool>((ref) => false);
+
 final subscriptionNodesProvider = FutureProvider<List<SubscriptionNode>>((
   ref,
 ) async {
@@ -19,7 +22,7 @@ final subscriptionNodesProvider = FutureProvider<List<SubscriptionNode>>((
   if (subState is! SubscriptionReady) return const [];
 
   final subUrl = subState.status.subUrl.trim();
-  final text = subUrl.isEmpty
+  final text = subUrl.isEmpty || _isBackendSubscriptionUrl(subUrl)
       ? await ref.read(cocoApiProvider).subscriptionText()
       : (await Dio(
                   BaseOptions(
@@ -28,7 +31,13 @@ final subscriptionNodesProvider = FutureProvider<List<SubscriptionNode>>((
                   ),
                 ).get<String>(
                   subUrl,
-                  options: Options(responseType: ResponseType.plain),
+                  options: Options(
+                    responseType: ResponseType.plain,
+                    headers: const {
+                      'Cache-Control': 'no-cache',
+                      'Pragma': 'no-cache',
+                    },
+                  ),
                 ))
                 .data ??
             '';
@@ -37,9 +46,37 @@ final subscriptionNodesProvider = FutureProvider<List<SubscriptionNode>>((
   if (nodes.isNotEmpty &&
       (selected == null || !nodes.any((node) => node.raw == selected.raw))) {
     ref.read(selectedSubscriptionNodeProvider.notifier).state = nodes.first;
+  } else if (nodes.isEmpty) {
+    ref.read(selectedSubscriptionNodeProvider.notifier).state = null;
   }
   return nodes;
 }, name: 'subscriptionNodes');
+
+bool _isBackendSubscriptionUrl(String value) {
+  final subscriptionUri = Uri.tryParse(value);
+  final apiUri = Uri.tryParse(AppConfig.fromEnv().baseUrl);
+  if (subscriptionUri == null || apiUri == null) return false;
+
+  return subscriptionUri.scheme == apiUri.scheme &&
+      subscriptionUri.host == apiUri.host &&
+      subscriptionUri.port == apiUri.port &&
+      subscriptionUri.path.endsWith('/v1/link');
+}
+
+Future<void> refreshSubscriptionNodes(WidgetRef ref) async {
+  if (ref.read(subscriptionNodesRefreshingProvider)) return;
+
+  ref.read(subscriptionNodesRefreshingProvider.notifier).state = true;
+  try {
+    await ref
+        .read(subscriptionControllerProvider.notifier)
+        .fetch(forceRefresh: true);
+    ref.invalidate(subscriptionNodesProvider);
+    await ref.read(subscriptionNodesProvider.future);
+  } finally {
+    ref.read(subscriptionNodesRefreshingProvider.notifier).state = false;
+  }
+}
 
 List<SubscriptionNode> parseSubscriptionNodes(String input) {
   final decoded = _decodeSubscription(input.trim());
@@ -72,6 +109,14 @@ String _decodeSubscription(String text) {
 SubscriptionNode? _parseNode(String raw) {
   final uri = Uri.tryParse(raw);
   if (uri == null || uri.scheme.isEmpty) return null;
+
+  const supportedSchemes = {'vless', 'trojan', 'ss'};
+  if (!supportedSchemes.contains(uri.scheme.toLowerCase()) ||
+      uri.host.isEmpty ||
+      uri.port <= 0 ||
+      uri.port > 65535) {
+    return null;
+  }
 
   final type = uri.scheme.toUpperCase();
   final name = uri.fragment.isNotEmpty
@@ -114,21 +159,29 @@ Future<int?> measureNodeLatency(SubscriptionNode node) async {
   if (n.contains('korea') ||
       n.contains('kr') ||
       n.contains('韩国') ||
-      n.contains('高丽'))
+      n.contains('高丽')) {
     return ('Korea Republic of', '🇰🇷');
-  if (n.contains('singapore') || n.contains('sg') || n.contains('新加坡'))
+  }
+  if (n.contains('singapore') || n.contains('sg') || n.contains('新加坡')) {
     return ('Singapore', '🇸🇬');
-  if (n.contains('thailand') || n.contains('thai') || n.contains('泰国'))
+  }
+  if (n.contains('thailand') || n.contains('thai') || n.contains('泰国')) {
     return ('Thailand', '🇹🇭');
-  if (n.contains('japan') || n.contains('jp') || n.contains('日本'))
+  }
+  if (n.contains('japan') || n.contains('jp') || n.contains('日本')) {
     return ('Japan', '🇯🇵');
-  if (n.contains('united states') || n.contains('us') || n.contains('美国'))
+  }
+  if (n.contains('united states') || n.contains('us') || n.contains('美国')) {
     return ('United States', '🇺🇸');
-  if (n.contains('hong kong') || n.contains('hk') || n.contains('香港'))
+  }
+  if (n.contains('hong kong') || n.contains('hk') || n.contains('香港')) {
     return ('Hong Kong', '🇭🇰');
-  if (n.contains('de ') || n.contains('germany') || n.contains('德国'))
+  }
+  if (n.contains('de ') || n.contains('germany') || n.contains('德国')) {
     return ('Germany', '🇩🇪');
-  if (n.contains('nl') || n.contains('netherlands') || n.contains('荷兰'))
+  }
+  if (n.contains('nl') || n.contains('netherlands') || n.contains('荷兰')) {
     return ('Netherlands', '🇳🇱');
+  }
   return ('Global Node', '🌐');
 }

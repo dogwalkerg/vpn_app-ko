@@ -1,10 +1,11 @@
-﻿// lib/features/auth/providers/auth_controller.dart
+// lib/features/auth/providers/auth_controller.dart
 import 'dart:async';
 import 'package:dio/dio.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:vpn_app/core/cache/memory_cache.dart';
 import 'package:vpn_app/core/models/feature_state.dart';
 import 'package:vpn_app/features/subscription/providers/subscription_controller.dart';
+import 'package:vpn_app/features/vpn/providers/subscription_nodes_provider.dart';
 import 'package:vpn_app/features/vpn/providers/vpn_controller.dart';
 import '../../../core/errors/exceptions.dart';
 import '../../../core/storage/secure_storage.dart';
@@ -43,14 +44,14 @@ class AuthController extends StateNotifier<AuthState> {
   CancelToken? _ct;
 
   AuthController(this.ref, repo)
-      : _login = LoginUseCase(repo),
-        _register = RegisterUseCase(repo),
-        _verifyEmail = VerifyEmailUseCase(repo),
-        _validateToken = ValidateTokenUseCase(repo),
-        _logout = LogoutUseCase(repo),
-        _forgotPassword = ForgotPasswordUseCase(repo),
-        _resetPassword = ResetPasswordUseCase(repo),
-        super(const FeatureIdle()) {
+    : _login = LoginUseCase(repo),
+      _register = RegisterUseCase(repo),
+      _verifyEmail = VerifyEmailUseCase(repo),
+      _validateToken = ValidateTokenUseCase(repo),
+      _logout = LogoutUseCase(repo),
+      _forgotPassword = ForgotPasswordUseCase(repo),
+      _resetPassword = ResetPasswordUseCase(repo),
+      super(const FeatureIdle()) {
     ref.onDispose(_cancelActive);
     _bootstrap();
   }
@@ -75,7 +76,11 @@ class AuthController extends StateNotifier<AuthState> {
     ref.read(tokenProvider.notifier).state = token;
 
     if (token != null) {
-      unawaited(ref.read(subscriptionControllerProvider.notifier).fetch());
+      unawaited(
+        ref
+            .read(subscriptionControllerProvider.notifier)
+            .fetch(forceRefresh: true),
+      );
     }
 
     final cached = _userCache.value;
@@ -92,7 +97,10 @@ class AuthController extends StateNotifier<AuthState> {
       final user = await _validateToken(cancelToken: _replaceToken());
       _userCache.set(user);
       state = FeatureReady<User>(user);
-      await ref.read(subscriptionControllerProvider.notifier).fetch();
+      await ref
+          .read(subscriptionControllerProvider.notifier)
+          .fetch(forceRefresh: true);
+      ref.invalidate(subscriptionNodesProvider);
     } catch (_) {
       // 静默忽略登出异常。
     }
@@ -113,7 +121,10 @@ class AuthController extends StateNotifier<AuthState> {
       _userCache.set(res.user);
       state = FeatureReady<User>(res.user);
 
-      await ref.read(subscriptionControllerProvider.notifier).fetch();
+      await ref
+          .read(subscriptionControllerProvider.notifier)
+          .fetch(forceRefresh: true);
+      ref.invalidate(subscriptionNodesProvider);
     } on ApiException catch (e) {
       if (!ct.isCancelled) state = FeatureError<User>(e.message);
     } catch (_) {
@@ -150,7 +161,10 @@ class AuthController extends StateNotifier<AuthState> {
       final user = await _validateToken(cancelToken: ct);
       _userCache.set(user);
       state = FeatureReady<User>(user);
-      await ref.read(subscriptionControllerProvider.notifier).fetch();
+      await ref
+          .read(subscriptionControllerProvider.notifier)
+          .fetch(forceRefresh: true);
+      ref.invalidate(subscriptionNodesProvider);
     } on UnauthorizedException {
       await logout(silent: true);
       state = const FeatureIdle();
@@ -171,6 +185,8 @@ class AuthController extends StateNotifier<AuthState> {
     await AppSecureStorage.clearToken();
 
     ref.invalidate(subscriptionControllerProvider);
+    ref.invalidate(subscriptionNodesProvider);
+    ref.read(selectedSubscriptionNodeProvider.notifier).state = null;
 
     state = const FeatureIdle();
   }
@@ -186,7 +202,11 @@ class AuthController extends StateNotifier<AuthState> {
     }
   }
 
-  Future<void> resetPassword(String username, String resetCode, String newPassword) async {
+  Future<void> resetPassword(
+    String username,
+    String resetCode,
+    String newPassword,
+  ) async {
     state = const FeatureLoading();
     final ct = _replaceToken();
     try {
@@ -197,6 +217,3 @@ class AuthController extends StateNotifier<AuthState> {
     }
   }
 }
-
-
-

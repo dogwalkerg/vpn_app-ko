@@ -21,6 +21,7 @@ class SwrEntry<T> {
   final MemoryCache<T> _cache = MemoryCache<T>();
   bool get hasValue => _cache.value != null;
   T? get value => _cache.value;
+  bool get isFresh => _cache.value != null && !_cache.isStale(ttl);
 
   Future<T> get({bool forceRefresh = false}) async {
     final cached = _cache.value;
@@ -44,7 +45,9 @@ class SwrEntry<T> {
   }
 
   Future<void> _safeRefresh() async {
-    try { await refresh(); } catch (_) {}
+    try {
+      await refresh();
+    } catch (_) {}
   }
 
   Future<void> revalidateIfNeeded() async {
@@ -82,6 +85,7 @@ class SwrStore with WidgetsBindingObserver {
       }
     }
   }
+
   SwrEntry<T> register<T>({
     required String key,
     required Future<T> Function() fetcher,

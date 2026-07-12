@@ -18,15 +18,15 @@ class SubscriptionRepositoryImpl implements SubscriptionRepository {
     this.ttl = const Duration(seconds: 60),
     required SwrStore swr,
   }) : _entry = swr.register<SubscriptionStatus>(
-          key: SwrKeys.subscription,
-          ttl: ttl,
-          fetcher: () async {
-            final data = _toStatusMap(await CocoApi(api).userInfo());
-            // Сохраним снапшот
-            unawaited(DiskCache.putJson(SwrKeys.subscription, data));
-            return subscriptionStatusFromMap(data);
-          },
-        ) {
+         key: SwrKeys.subscription,
+         ttl: ttl,
+         fetcher: () async {
+           final data = _toStatusMap(await CocoApi(api).userInfo());
+           // Сохраним снапшот
+           unawaited(DiskCache.putJson(SwrKeys.subscription, data));
+           return subscriptionStatusFromMap(data);
+         },
+       ) {
     // Гидратация из снапшота
     _hydrateFromSnapshot();
   }
@@ -47,12 +47,14 @@ class SubscriptionRepositoryImpl implements SubscriptionRepository {
   SubscriptionStatus? getCached() => _entry.value;
 
   @override
-  bool isCacheFresh() => _entry.value != null;
+  bool isCacheFresh() => _entry.isFresh;
 
   @override
   Future<SubscriptionStatus> fetchFresh({CancelToken? cancelToken}) async {
     try {
-      final data = _toStatusMap(await CocoApi(api).userInfo(cancelToken: cancelToken));
+      final data = _toStatusMap(
+        await CocoApi(api).userInfo(cancelToken: cancelToken),
+      );
       final fresh = subscriptionStatusFromMap(data);
 
       // кладём свежие данные и снапшот
@@ -66,15 +68,15 @@ class SubscriptionRepositoryImpl implements SubscriptionRepository {
 }
 
 Map<String, dynamic> _toStatusMap(CocoUserInfo user) => {
-      'is_trial': false,
-      'is_paid': user.canUse,
-      'paid_until': user.expiresAt?.toIso8601String(),
-      'can_use': user.canUse,
-      'device_count': 0,
-      'max_devices': 0,
-      'balance': user.balance,
-      'sub_url': user.subscriptionUrl,
-      'traffic_total': user.trafficTotal,
-      'traffic_used': user.trafficUsed,
-      'level': user.level,
-    };
+  'is_trial': false,
+  'is_paid': user.canUse,
+  'paid_until': user.expiresAt?.toIso8601String(),
+  'can_use': user.canUse,
+  'device_count': 0,
+  'max_devices': 0,
+  'balance': user.balance,
+  'sub_url': user.subscriptionUrl,
+  'traffic_total': user.trafficTotal,
+  'traffic_used': user.trafficUsed,
+  'level': user.level,
+};

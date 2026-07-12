@@ -28,6 +28,7 @@ class VpnScreen extends ConsumerStatefulWidget {
 
 class _VpnScreenState extends ConsumerState<VpnScreen> {
   Timer? _timer;
+  Timer? _subscriptionRefreshTimer;
   DateTime? _connectedAt;
   Duration _connectedFor = Duration.zero;
   WebSocket? _trafficSocket;
@@ -45,14 +46,39 @@ class _VpnScreenState extends ConsumerState<VpnScreen> {
         _downloadSpeed = event.rxBytes!;
       });
     });
+    _subscriptionRefreshTimer = Timer.periodic(
+      const Duration(minutes: 1),
+      (_) => _refreshNodes(showFeedback: false),
+    );
   }
 
   @override
   void dispose() {
     _timer?.cancel();
+    _subscriptionRefreshTimer?.cancel();
     _trafficSocket?.close();
     _nativeTrafficSubscription?.cancel();
     super.dispose();
+  }
+
+  Future<void> _refreshNodes({bool showFeedback = true}) async {
+    try {
+      await refreshSubscriptionNodes(ref);
+      if (!mounted || !showFeedback) return;
+      final nodes = ref.read(subscriptionNodesProvider).valueOrNull ?? const [];
+      showAppSnackbar(
+        context,
+        text: nodes.isEmpty ? '订阅未返回可用节点' : '订阅节点已更新',
+        type: nodes.isEmpty ? AppSnackbarType.error : AppSnackbarType.success,
+      );
+    } catch (error) {
+      if (!mounted || !showFeedback) return;
+      showAppSnackbar(
+        context,
+        text: '订阅刷新失败：${error.toString()}',
+        type: AppSnackbarType.error,
+      );
+    }
   }
 
   void _syncTimer(bool connected) {
@@ -106,6 +132,7 @@ class _VpnScreenState extends ConsumerState<VpnScreen> {
   Widget build(BuildContext context) {
     final vpnState = ref.watch(vpnControllerProvider);
     final nodes = ref.watch(subscriptionNodesProvider);
+    final nodesRefreshing = ref.watch(subscriptionNodesRefreshingProvider);
     final selected = ref.watch(selectedSubscriptionNodeProvider);
     final subscription = ref.watch(subscriptionControllerProvider);
     final allowed = ref.watch(vpnAccessProvider);
@@ -144,11 +171,10 @@ class _VpnScreenState extends ConsumerState<VpnScreen> {
                   children: [
                     _CurrentNodeCard(
                       node: selected,
-                      loading: nodes.isLoading,
+                      loading: nodes.isLoading || nodesRefreshing,
                       onTap: () =>
                           nodes.whenData((items) => _openNodePicker(context)),
-                      onRefresh: () =>
-                          ref.invalidate(subscriptionNodesProvider),
+                      onRefresh: _refreshNodes,
                     ),
                     const SizedBox(height: 12),
                     _PowerButton(
@@ -548,6 +574,7 @@ class _NodePicker extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final selected = ref.watch(selectedSubscriptionNodeProvider);
     final nodesState = ref.watch(subscriptionNodesProvider);
+    final refreshing = ref.watch(subscriptionNodesRefreshingProvider);
     final nodes = nodesState.valueOrNull ?? const <SubscriptionNode>[];
     return Column(
       children: [
@@ -567,10 +594,10 @@ class _NodePicker extends ConsumerWidget {
               ),
               IconButton(
                 tooltip: '刷新订阅',
-                onPressed: nodesState.isLoading
+                onPressed: nodesState.isLoading || refreshing
                     ? null
-                    : () => ref.invalidate(subscriptionNodesProvider),
-                icon: nodesState.isLoading
+                    : () => _refresh(context, ref),
+                icon: nodesState.isLoading || refreshing
                     ? const SizedBox(
                         width: 25,
                         height: 25,
@@ -585,21 +612,28 @@ class _NodePicker extends ConsumerWidget {
           child: nodesState.hasError
               ? Center(
                   child: TextButton.icon(
-                    onPressed: () => ref.invalidate(subscriptionNodesProvider),
+                    onPressed: () => _refresh(context, ref),
                     icon: const Icon(Icons.refresh_rounded),
                     label: const Text('订阅刷新失败，点击重试'),
                   ),
                 )
               : nodes.isEmpty
-              ? const Center(child: CircularProgressIndicator())
+              ? Center(
+                  child: TextButton.icon(
+                    onPressed: refreshing ? null : () => _refresh(context, ref),
+                    icon: const Icon(Icons.refresh_rounded),
+                    label: const Text('订阅未返回可用节点，点击刷新重试'),
+                  ),
+                )
               : ListView.builder(
                   padding: const EdgeInsets.fromLTRB(16, 8, 16, 28),
                   itemCount: nodes.length + 1,
                   itemBuilder: (context, index) {
-                    if (index == 0)
+                    if (index == 0) {
                       return _SmartNodeTile(
                         onTap: () => _select(context, ref, nodes.first),
                       );
+                    }
                     final node = nodes[index - 1];
                     return Padding(
                       padding: const EdgeInsets.only(bottom: 11),
@@ -616,14 +650,35 @@ class _NodePicker extends ConsumerWidget {
     );
   }
 
+  Future<void> _refresh(BuildContext context, WidgetRef ref) async {
+    try {
+      await refreshSubscriptionNodes(ref);
+      if (!context.mounted) return;
+      final nodes = ref.read(subscriptionNodesProvider).valueOrNull ?? const [];
+      showAppSnackbar(
+        context,
+        text: nodes.isEmpty ? '订阅未返回可用节点' : '订阅节点已更新',
+        type: nodes.isEmpty ? AppSnackbarType.error : AppSnackbarType.success,
+      );
+    } catch (error) {
+      if (!context.mounted) return;
+      showAppSnackbar(
+        context,
+        text: '订阅刷新失败：${error.toString()}',
+        type: AppSnackbarType.error,
+      );
+    }
+  }
+
   Future<void> _select(
     BuildContext context,
     WidgetRef ref,
     SubscriptionNode node,
   ) async {
     final state = ref.read(vpnControllerProvider);
-    if (state is VpnConnected || state is VpnConnecting)
+    if (state is VpnConnected || state is VpnConnecting) {
       await ref.read(vpnControllerProvider.notifier).disconnectPressed();
+    }
     ref.read(selectedSubscriptionNodeProvider.notifier).state = node;
     if (context.mounted) Navigator.of(context).pop();
   }

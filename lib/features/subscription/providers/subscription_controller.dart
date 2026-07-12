@@ -8,14 +8,13 @@ import '../models/subscription_state.dart';
 import '../repositories/subscription_repository.dart';
 
 final subscriptionControllerProvider =
-    StateNotifierProvider<SubscriptionController, SubscriptionState>(
-  (ref) {
-    final ctrl = SubscriptionController(ref.watch(subscriptionRepositoryProvider));
-    ctrl.bind(ref);
-    return ctrl;
-  },
-  name: 'subscriptionController',
-);
+    StateNotifierProvider<SubscriptionController, SubscriptionState>((ref) {
+      final ctrl = SubscriptionController(
+        ref.watch(subscriptionRepositoryProvider),
+      );
+      ctrl.bind(ref);
+      return ctrl;
+    }, name: 'subscriptionController');
 
 class SubscriptionController extends StateNotifier<SubscriptionState> {
   SubscriptionController(this._repo) : super(const SubscriptionIdle());
@@ -40,7 +39,11 @@ class SubscriptionController extends StateNotifier<SubscriptionState> {
     _ct = null;
   }
 
-  Future<void> fetch() async {
+  Future<void> fetch({bool forceRefresh = false}) async {
+    if (forceRefresh) {
+      await _refresh(throwOnError: true);
+      return;
+    }
     final cached = _repo.getCached();
     if (cached != null) {
       state = SubscriptionReady(cached);
@@ -54,7 +57,7 @@ class SubscriptionController extends StateNotifier<SubscriptionState> {
     await _refresh();
   }
 
-  Future<void> _refresh() async {
+  Future<void> _refresh({bool throwOnError = false}) async {
     final ct = _replaceToken();
     try {
       final fresh = await _repo.fetchFresh(cancelToken: ct);
@@ -65,6 +68,7 @@ class SubscriptionController extends StateNotifier<SubscriptionState> {
       if (state is! SubscriptionReady) {
         state = SubscriptionError(presentableError(e));
       }
+      if (throwOnError) rethrow;
     }
   }
 }
