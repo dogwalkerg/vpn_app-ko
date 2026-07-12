@@ -198,7 +198,7 @@ abstract class V2RayURL {
       };
     } else if (transport == 'ws') {
       streamSetting['wsSettings'] = {
-        "path": path ?? ['/'],
+        "path": path ?? '/',
         "headers": {"Host": host ?? ""},
         "maxEarlyData": null,
         "useBrowserForwarding": null,
@@ -207,12 +207,12 @@ abstract class V2RayURL {
       sni = streamSetting['wsSettings']['headers']['Host'];
     } else if (transport == 'h2' || transport == 'http') {
       streamSetting['network'] = 'h2';
-      streamSetting['h2Setting'] = {
-        "host": host?.split(",") ?? "",
-        "path": path ?? ['/'],
+      streamSetting['httpSettings'] = {
+        "host": host?.split(",") ?? <String>[],
+        "path": path ?? '/',
       };
-      sni = streamSetting['h2Setting']['host'].length > 0
-          ? streamSetting['h2Setting']['host'][0]
+      sni = streamSetting['httpSettings']['host'].length > 0
+          ? streamSetting['httpSettings']['host'][0]
           : sni;
     } else if (transport == 'quic') {
       streamSetting['quicSettings'] = {
@@ -270,6 +270,8 @@ abstract class V2RayURL {
       streamSetting['realitySettings'] = null;
       streamSetting['tlsSettings'] = tlsSetting;
     } else if (streamSecurity == 'reality') {
+      tlsSetting['fingerprint'] =
+          (fingerprint == null || fingerprint.isEmpty) ? 'chrome' : fingerprint;
       streamSetting['tlsSettings'] = null;
       streamSetting['realitySettings'] = tlsSetting;
     }

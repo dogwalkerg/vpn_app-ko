@@ -5,6 +5,7 @@ import 'dart:io'
     show
         Directory,
         File,
+        HttpClient,
         Platform,
         Process,
         ProcessSignal,
@@ -13,6 +14,7 @@ import 'dart:io'
 import 'dart:math' as math;
 
 import 'package:dio/dio.dart';
+import 'package:dio/io.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:crypto/crypto.dart' show sha256;
 import 'package:vpn_app/features/vpn/mappers/vpn_mapper.dart';
@@ -229,7 +231,10 @@ class VpnRepositoryImpl implements VpnRepository {
     );
     await engine.initializeV2Ray();
     final parser = FlutterV2ray.parseFromURL(node.raw);
-    final config = buildAndroidV2rayConfig(parser.getFullConfiguration());
+    final config = await prepareAndroidV2rayConfig(
+      parser.getFullConfiguration(),
+      serverHost: node.host,
+    );
     final allowed = await engine.requestPermission();
     if (!allowed) throw Exception('未获得 VPN 权限');
     _v2rayReady = Completer<void>();
@@ -312,6 +317,8 @@ class VpnRepositoryImpl implements VpnRepository {
             status != null && status >= 200 && status < 500,
       ),
     );
+    (client.httpClientAdapter as IOHttpClientAdapter).createHttpClient = () =>
+        HttpClient()..findProxy = (_) => 'PROXY 127.0.0.1:10809';
     for (final url in const [
       'https://www.gstatic.com/generate_204',
       'https://cp.cloudflare.com/generate_204',

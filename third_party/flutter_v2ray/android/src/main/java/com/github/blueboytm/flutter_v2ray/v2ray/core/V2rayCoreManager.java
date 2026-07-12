@@ -14,6 +14,7 @@ import android.content.pm.PackageManager;
 import android.graphics.Color;
 import android.os.Build;
 import android.os.CountDownTimer;
+import android.net.TrafficStats;
 import android.util.Log;
 
 import androidx.annotation.RequiresApi;
@@ -89,6 +90,9 @@ public final class V2rayCoreManager {
     private CountDownTimer countDownTimer;
     private int seconds, minutes, hours;
     private long totalDownload, totalUpload, uploadSpeed, downloadSpeed;
+    private long lastDeviceDownload = -1;
+    private long lastDeviceUpload = -1;
+    private volatile boolean tunnelReady = false;
     private String SERVICE_DURATION = "00:00:00";
 
     public static V2rayCoreManager getInstance() {
@@ -119,8 +123,14 @@ public final class V2rayCoreManager {
                     hours = 0;
                 }
                 if (enable_traffic_statics) {
-                    downloadSpeed = v2RayPoint.queryStats("block", "downlink") + v2RayPoint.queryStats("proxy", "downlink");
-                    uploadSpeed = v2RayPoint.queryStats("block", "uplink") + v2RayPoint.queryStats("proxy", "uplink");
+                    long currentDownload = TrafficStats.getTotalRxBytes();
+                    long currentUpload = TrafficStats.getTotalTxBytes();
+                    downloadSpeed = lastDeviceDownload >= 0 && currentDownload >= lastDeviceDownload
+                            ? currentDownload - lastDeviceDownload : 0;
+                    uploadSpeed = lastDeviceUpload >= 0 && currentUpload >= lastDeviceUpload
+                            ? currentUpload - lastDeviceUpload : 0;
+                    lastDeviceDownload = currentDownload;
+                    lastDeviceUpload = currentUpload;
                     totalDownload = totalDownload + downloadSpeed;
                     totalUpload = totalUpload + uploadSpeed;
                 }
@@ -156,6 +166,8 @@ public final class V2rayCoreManager {
             downloadSpeed = 0;
             totalDownload = 0;
             totalUpload = 0;
+            lastDeviceDownload = TrafficStats.getTotalRxBytes();
+            lastDeviceUpload = TrafficStats.getTotalTxBytes();
             Log.e(V2rayCoreManager.class.getSimpleName(), "setUpListener => new initialize from " + v2rayServicesListener.getService().getClass().getSimpleName());
         } catch (Exception e) {
             Log.e(V2rayCoreManager.class.getSimpleName(), "setUpListener failed => ", e);
@@ -164,6 +176,7 @@ public final class V2rayCoreManager {
     }
 
     public boolean startCore(final V2rayConfig v2rayConfig) {
+        tunnelReady = false;
         makeDurationTimer(v2rayServicesListener.getService().getApplicationContext(),
                 v2rayConfig.ENABLE_TRAFFIC_STATICS);
         V2RAY_STATE = AppConfigs.V2RAY_STATES.V2RAY_CONNECTING;
@@ -178,7 +191,9 @@ public final class V2rayCoreManager {
             v2RayPoint.setConfigureFileContent(v2rayConfig.V2RAY_FULL_JSON_CONFIG);
             v2RayPoint.setDomainName(v2rayConfig.CONNECTED_V2RAY_SERVER_ADDRESS + ":" + v2rayConfig.CONNECTED_V2RAY_SERVER_PORT);
             v2RayPoint.runLoop(false);
-            V2RAY_STATE = AppConfigs.V2RAY_STATES.V2RAY_CONNECTED;
+            if (tunnelReady && isV2rayCoreRunning()) {
+                V2RAY_STATE = AppConfigs.V2RAY_STATES.V2RAY_CONNECTED;
+            }
             if (isV2rayCoreRunning()) {
                 showNotification(v2rayConfig);
             }
@@ -187,6 +202,13 @@ public final class V2rayCoreManager {
             return false;
         }
         return true;
+    }
+
+    public synchronized void markTunnelReady() {
+        tunnelReady = true;
+        if (isV2rayCoreRunning()) {
+            V2RAY_STATE = AppConfigs.V2RAY_STATES.V2RAY_CONNECTED;
+        }
     }
 
     public void stopCore() {
@@ -216,6 +238,9 @@ public final class V2rayCoreManager {
         hours = 0;
         uploadSpeed = 0;
         downloadSpeed = 0;
+        tunnelReady = false;
+        lastDeviceDownload = -1;
+        lastDeviceUpload = -1;
         if (v2rayServicesListener != null) {
             Intent connection_info_intent = new Intent("V2RAY_CONNECTION_INFO");
             connection_info_intent.putExtra("STATE", V2rayCoreManager.getInstance().V2RAY_STATE);

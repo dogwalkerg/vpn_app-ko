@@ -4,6 +4,7 @@ import android.app.Service;
 import android.content.Intent;
 import android.net.LocalSocket;
 import android.net.LocalSocketAddress;
+import android.net.ProxyInfo;
 import android.net.VpnService;
 import android.os.Build;
 import android.os.ParcelFileDescriptor;
@@ -96,11 +97,12 @@ public class V2rayVPNService extends VpnService implements V2rayServicesListener
         }
         Builder builder = new Builder();
         builder.setSession(v2rayConfig.REMARK);
-        builder.setMtu(1280);
-        builder.addAddress("26.26.26.1", 30);
+        builder.setMtu(1500);
+        builder.addAddress("10.0.0.1", 30);
 
         if (v2rayConfig.BYPASS_SUBNETS == null || v2rayConfig.BYPASS_SUBNETS.isEmpty()) {
             builder.addRoute("0.0.0.0", 0);
+            builder.addRoute("::", 0);
         } else {
             for (String subnet : v2rayConfig.BYPASS_SUBNETS) {
                 String[] parts = subnet.split("/");
@@ -121,6 +123,13 @@ public class V2rayVPNService extends VpnService implements V2rayServicesListener
             }
         }
         try {
+            // Keep Xray and tun2socks sockets outside the VPN. Without this,
+            // their localhost SOCKS connection can be captured by the TUN again.
+            builder.addDisallowedApplication(getPackageName());
+        } catch (Exception e) {
+            Log.w("VPN_SERVICE", "Unable to exclude VPN application", e);
+        }
+        try {
             JSONObject json = new JSONObject(v2rayConfig.V2RAY_FULL_JSON_CONFIG);
             JSONObject dnsObject = json.getJSONObject("dns");
             JSONArray serversArray = dnsObject.getJSONArray("servers");
@@ -138,6 +147,7 @@ public class V2rayVPNService extends VpnService implements V2rayServicesListener
         }
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
             builder.setMetered(false);
+            builder.setHttpProxy(ProxyInfo.buildDirectProxy("127.0.0.1", v2rayConfig.LOCAL_HTTP_PORT));
         }
 
         try {
@@ -156,10 +166,10 @@ public class V2rayVPNService extends VpnService implements V2rayServicesListener
             Log.w("VPN_SERVICE", "Unable to remove stale tun2socks socket");
         }
         ArrayList<String> cmd = new ArrayList<>(Arrays.asList(new File(getApplicationInfo().nativeLibraryDir, "libtun2socks.so").getAbsolutePath(),
-                "--netif-ipaddr", "26.26.26.2",
+                "--netif-ipaddr", "10.0.0.2",
                 "--netif-netmask", "255.255.255.252",
                 "--socks-server-addr", "127.0.0.1:" + v2rayConfig.LOCAL_SOCKS5_PORT,
-                "--tunmtu", "1280",
+                "--tunmtu", "1500",
                 "--sock-path", "sock_path",
                 "--enable-udprelay",
                 "--loglevel", "error"));
@@ -215,6 +225,7 @@ public class V2rayVPNService extends VpnService implements V2rayServicesListener
                     clientLocalSocket.setFileDescriptorsForSend(null);
                     clientLocalSocket.shutdownOutput();
                     clientLocalSocket.close();
+                    V2rayCoreManager.getInstance().markTunnelReady();
                     break;
                 } catch (Exception e) {
                     Log.e(V2rayVPNService.class.getSimpleName(), "sendFd failed =>", e);

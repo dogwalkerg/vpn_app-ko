@@ -1,6 +1,7 @@
 import 'dart:convert';
 
 import 'package:flutter_test/flutter_test.dart';
+import 'package:flutter_v2ray/flutter_v2ray.dart';
 import 'package:vpn_app/features/vpn/config/android_v2ray_config.dart';
 
 void main() {
@@ -30,5 +31,48 @@ void main() {
       'statsOutboundDownlink': true,
     });
     expect(config['stats'], isEmpty);
+  });
+
+  test('resolves the server while preserving TLS serverName', () async {
+    const source = '''
+{
+  "inbounds": [],
+  "outbounds": [{
+    "tag": "proxy",
+    "protocol": "vless",
+    "settings": {"vnext": [{"address": "localhost", "port": 443}]},
+    "streamSettings": {
+      "network": "tcp",
+      "security": "tls",
+      "tlsSettings": {"serverName": ""}
+    }
+  }]
+}
+''';
+
+    final prepared =
+        jsonDecode(
+              await prepareAndroidV2rayConfig(source, serverHost: 'localhost'),
+            )
+            as Map;
+    final proxy = (prepared['outbounds'] as List).first as Map;
+    final vnext = ((proxy['settings'] as Map)['vnext'] as List).first as Map;
+    final tls = (proxy['streamSettings'] as Map)['tlsSettings'] as Map;
+
+    expect(vnext['address'], anyOf('127.0.0.1', '::1'));
+    expect(tls['serverName'], 'localhost');
+  });
+
+  test('generates compatible WS and Reality settings', () {
+    final parser = FlutterV2ray.parseFromURL(
+      'vless://00000000-0000-0000-0000-000000000001@example.com:443'
+      '?type=ws&security=reality&pbk=test&sid=01#node',
+    );
+    final config = jsonDecode(parser.getFullConfiguration()) as Map;
+    final proxy = (config['outbounds'] as List).first as Map;
+    final stream = proxy['streamSettings'] as Map;
+
+    expect((stream['wsSettings'] as Map)['path'], '/');
+    expect((stream['realitySettings'] as Map)['fingerprint'], 'chrome');
   });
 }
