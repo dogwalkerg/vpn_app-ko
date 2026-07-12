@@ -196,6 +196,7 @@ jobs:
       with:
         tag_name: v${{ github.event.inputs.version }}
         name: Release v${{ github.event.inputs.version }}
+        target_commitish: ${{ github.sha }}
         body: "Android APK + unsigned iOS IPA + Windows + macOS"
         files: artifacts/**/*
       env:
