@@ -5,6 +5,7 @@ class V2RayStatus {
   final int upload;
   final int download;
   final String state;
+  final String error;
 
   V2RayStatus({
     this.duration = "00:00:00",
@@ -13,5 +14,6 @@ class V2RayStatus {
     this.upload = 0,
     this.download = 0,
     this.state = "DISCONNECTED",
+    this.error = "",
   });
 }

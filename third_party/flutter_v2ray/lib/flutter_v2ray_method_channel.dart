@@ -26,6 +26,7 @@ class MethodChannelFlutterV2ray extends FlutterV2rayPlatform {
           upload: int.parse(event[3]),
           download: int.parse(event[4]),
           state: event[5],
+          error: event.length > 6 ? event[6].toString() : '',
         ));
       }
     });

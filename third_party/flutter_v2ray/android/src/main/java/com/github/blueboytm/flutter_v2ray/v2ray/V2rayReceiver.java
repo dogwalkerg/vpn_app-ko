@@ -22,6 +22,7 @@ public class V2rayReceiver extends BroadcastReceiver {
             list.add(String.valueOf(intent.getLongExtra("UPLOAD_TRAFFIC", 0)));
             list.add(String.valueOf(intent.getLongExtra("DOWNLOAD_TRAFFIC", 0)));
             list.add(intent.getExtras().getSerializable("STATE").toString().substring(6));
+            list.add(intent.getStringExtra("ERROR") == null ? "" : intent.getStringExtra("ERROR"));
             vpnStatusSink.success(list);
         } catch (Exception e) {
             Log.e("V2rayReceiver", "onReceive failed", e);

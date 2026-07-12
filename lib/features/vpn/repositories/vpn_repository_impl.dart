@@ -47,6 +47,7 @@ class VpnRepositoryImpl implements VpnRepository {
   final VpnChannel _vpn = VpnChannel();
   FlutterV2ray? _v2ray;
   bool _v2rayConnected = false;
+  bool _v2raySawConnecting = false;
   Completer<void>? _v2rayReady;
   Process? _clashProcess;
   bool _clashAttached = false;
@@ -214,9 +215,19 @@ class VpnRepositoryImpl implements VpnRepository {
     final engine = _v2ray ??= FlutterV2ray(
       onStatusChanged: (status) {
         final state = status.state.toUpperCase();
+        if (state == 'CONNECTING') _v2raySawConnecting = true;
         _v2rayConnected = state == 'CONNECTED';
         if (_v2rayConnected && !(_v2rayReady?.isCompleted ?? true)) {
           _v2rayReady!.complete();
+        }
+        if (state == 'DISCONNECTED' &&
+            _v2raySawConnecting &&
+            !(_v2rayReady?.isCompleted ?? true)) {
+          _v2rayReady!.completeError(
+            StateError(
+              status.error.isEmpty ? 'Android VPN 数据通道启动失败' : status.error,
+            ),
+          );
         }
         if (_v2rayConnected) {
           _vpn.report(
@@ -238,6 +249,7 @@ class VpnRepositoryImpl implements VpnRepository {
     final allowed = await engine.requestPermission();
     if (!allowed) throw Exception('未获得 VPN 权限');
     _v2rayReady = Completer<void>();
+    _v2raySawConnecting = false;
     await engine.startV2Ray(
       remark: parser.remark,
       config: config,

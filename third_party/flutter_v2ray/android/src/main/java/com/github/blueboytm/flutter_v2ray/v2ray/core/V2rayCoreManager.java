@@ -2,7 +2,6 @@ package com.github.blueboytm.flutter_v2ray.v2ray.core;
 
 import static com.github.blueboytm.flutter_v2ray.v2ray.utils.Utilities.getUserAssetsPath;
 
-import android.Manifest;
 import android.app.Notification;
 import android.app.NotificationChannel;
 import android.app.NotificationManager;
@@ -10,7 +9,6 @@ import android.app.PendingIntent;
 import android.app.Service;
 import android.content.Context;
 import android.content.Intent;
-import android.content.pm.PackageManager;
 import android.graphics.Color;
 import android.os.Build;
 import android.os.CountDownTimer;
@@ -18,7 +16,6 @@ import android.net.TrafficStats;
 import android.util.Log;
 
 import androidx.annotation.RequiresApi;
-import androidx.core.app.ActivityCompat;
 import androidx.core.app.NotificationCompat;
 
 import com.github.blueboytm.flutter_v2ray.v2ray.interfaces.V2rayServicesListener;
@@ -93,6 +90,7 @@ public final class V2rayCoreManager {
     private long lastDeviceDownload = -1;
     private long lastDeviceUpload = -1;
     private volatile boolean tunnelReady = false;
+    private volatile String tunnelError = "";
     private String SERVICE_DURATION = "00:00:00";
 
     public static V2rayCoreManager getInstance() {
@@ -177,9 +175,11 @@ public final class V2rayCoreManager {
 
     public boolean startCore(final V2rayConfig v2rayConfig) {
         tunnelReady = false;
+        tunnelError = "";
         makeDurationTimer(v2rayServicesListener.getService().getApplicationContext(),
                 v2rayConfig.ENABLE_TRAFFIC_STATICS);
         V2RAY_STATE = AppConfigs.V2RAY_STATES.V2RAY_CONNECTING;
+        broadcastConnectionInfo();
         if (!isLibV2rayCoreInitialized) {
             Log.e(V2rayCoreManager.class.getSimpleName(), "startCore failed => LibV2rayCore should be initialize before start.");
             return false;
@@ -193,6 +193,7 @@ public final class V2rayCoreManager {
             v2RayPoint.runLoop(false);
             if (tunnelReady && isV2rayCoreRunning()) {
                 V2RAY_STATE = AppConfigs.V2RAY_STATES.V2RAY_CONNECTED;
+                broadcastConnectionInfo();
             }
             if (isV2rayCoreRunning()) {
                 showNotification(v2rayConfig);
@@ -206,9 +207,31 @@ public final class V2rayCoreManager {
 
     public synchronized void markTunnelReady() {
         tunnelReady = true;
+        tunnelError = "";
         if (isV2rayCoreRunning()) {
             V2RAY_STATE = AppConfigs.V2RAY_STATES.V2RAY_CONNECTED;
+            broadcastConnectionInfo();
         }
+    }
+
+    public synchronized void markTunnelFailed(String reason) {
+        tunnelReady = false;
+        tunnelError = reason == null ? "" : reason;
+        V2RAY_STATE = AppConfigs.V2RAY_STATES.V2RAY_DISCONNECTED;
+        broadcastConnectionInfo();
+    }
+
+    private void broadcastConnectionInfo() {
+        if (v2rayServicesListener == null) return;
+        Intent intent = new Intent("V2RAY_CONNECTION_INFO");
+        intent.putExtra("STATE", V2RAY_STATE);
+        intent.putExtra("DURATION", SERVICE_DURATION);
+        intent.putExtra("UPLOAD_SPEED", uploadSpeed);
+        intent.putExtra("DOWNLOAD_SPEED", downloadSpeed);
+        intent.putExtra("UPLOAD_TRAFFIC", totalUpload);
+        intent.putExtra("DOWNLOAD_TRAFFIC", totalDownload);
+        intent.putExtra("ERROR", tunnelError);
+        v2rayServicesListener.getService().getApplicationContext().sendBroadcast(intent);
     }
 
     public void stopCore() {
@@ -281,18 +304,10 @@ public final class V2rayCoreManager {
         return "";
     }
 
-    private void showNotification(final V2rayConfig v2rayConfig) {
+    public void showNotification(final V2rayConfig v2rayConfig) {
         Service context = v2rayServicesListener.getService();
         if (context == null) {
             return;
-        }
-
-        // Check notification permission for Android 13+
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            if (ActivityCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS)
-                    != PackageManager.PERMISSION_GRANTED) {
-                return;
-            }
         }
 
         Intent launchIntent = context.getPackageManager().getLaunchIntentForPackage(context.getPackageName());
