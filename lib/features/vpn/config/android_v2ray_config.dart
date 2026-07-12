@@ -37,5 +37,9 @@ String buildAndroidV2rayConfig(String source) {
       <String, dynamic>{};
   routing['domainStrategy'] = 'IPIfNonMatch';
   config['routing'] = routing;
+  config['policy'] = {
+    'system': {'statsOutboundUplink': true, 'statsOutboundDownlink': true},
+  };
+  config['stats'] = <String, dynamic>{};
   return jsonEncode(config);
 }

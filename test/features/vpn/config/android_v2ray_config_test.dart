@@ -25,5 +25,10 @@ void main() {
     expect((socks['settings'] as Map)['udp'], isTrue);
     expect(http['port'], 10809);
     expect(inbounds, hasLength(2));
+    expect((config['policy'] as Map)['system'], {
+      'statsOutboundUplink': true,
+      'statsOutboundDownlink': true,
+    });
+    expect(config['stats'], isEmpty);
   });
 }

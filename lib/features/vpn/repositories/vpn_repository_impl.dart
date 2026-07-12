@@ -230,15 +230,6 @@ class VpnRepositoryImpl implements VpnRepository {
     await engine.initializeV2Ray();
     final parser = FlutterV2ray.parseFromURL(node.raw);
     final config = buildAndroidV2rayConfig(parser.getFullConfiguration());
-    final delay = await engine
-        .getServerDelay(
-          config: config,
-          url: 'https://www.gstatic.com/generate_204',
-        )
-        .timeout(const Duration(seconds: 10), onTimeout: () => -1);
-    if (delay < 0) {
-      throw Exception('${node.name} 在当前移动网络不可用，正在切换线路');
-    }
     final allowed = await engine.requestPermission();
     if (!allowed) throw Exception('未获得 VPN 权限');
     _v2rayReady = Completer<void>();

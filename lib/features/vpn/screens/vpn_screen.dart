@@ -183,12 +183,8 @@ class _VpnScreenState extends ConsumerState<VpnScreen> {
                         const SizedBox(height: 6),
                         Expanded(
                           child: LayoutBuilder(
-                            builder: (context, powerConstraints) {
-                              final errorSpace = error == null ? 0.0 : 66.0;
-                              final diameter =
-                                  (powerConstraints.maxHeight - errorSpace)
-                                      .clamp(160.0, 240.0)
-                                      .toDouble();
+                            builder: (context, _) {
+                              const diameter = 160.0;
                               return Column(
                                 mainAxisAlignment: MainAxisAlignment.center,
                                 children: [
@@ -398,16 +394,16 @@ class _PowerButton extends StatelessWidget {
           ),
         ),
         Container(
-          width: diameter * (220 / 240),
-          height: diameter * (220 / 240),
+          width: diameter * (144 / 160),
+          height: diameter * (144 / 160),
           decoration: const BoxDecoration(
             shape: BoxShape.circle,
             color: Color(0xFFE1E7F3),
           ),
         ),
         Container(
-          width: diameter * (178 / 240),
-          height: diameter * (178 / 240),
+          width: diameter * (104 / 160),
+          height: diameter * (104 / 160),
           decoration: BoxDecoration(
             shape: BoxShape.circle,
             color: connected
