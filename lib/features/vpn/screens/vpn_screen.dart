@@ -167,8 +167,8 @@ class _VpnScreenState extends ConsumerState<VpnScreen> {
         children: [
           SafeArea(
             child: LayoutBuilder(
-              builder: (context, constraints) => SingleChildScrollView(
-                padding: const EdgeInsets.fromLTRB(16, 6, 16, 12),
+              builder: (context, constraints) => Padding(
+                padding: const EdgeInsets.fromLTRB(16, 6, 16, 16),
                 child: Center(
                   child: ConstrainedBox(
                     constraints: const BoxConstraints(maxWidth: 620),
@@ -181,21 +181,51 @@ class _VpnScreenState extends ConsumerState<VpnScreen> {
                           onRefresh: _refreshNodes,
                         ),
                         const SizedBox(height: 6),
-                        _PowerButton(
-                          connected: connected,
-                          busy: busy,
-                          disconnecting: disconnecting,
-                          enabled: allowed && selected != null,
-                          onPressed: () async {
-                            final controller = ref.read(
-                              vpnControllerProvider.notifier,
-                            );
-                            connected
-                                ? await controller.disconnectPressed()
-                                : await controller.connectPressed();
-                          },
+                        Expanded(
+                          child: LayoutBuilder(
+                            builder: (context, powerConstraints) {
+                              final errorSpace = error == null ? 0.0 : 66.0;
+                              final diameter =
+                                  (powerConstraints.maxHeight - errorSpace)
+                                      .clamp(160.0, 240.0)
+                                      .toDouble();
+                              return Column(
+                                mainAxisAlignment: MainAxisAlignment.center,
+                                children: [
+                                  _PowerButton(
+                                    diameter: diameter,
+                                    connected: connected,
+                                    busy: busy,
+                                    disconnecting: disconnecting,
+                                    enabled: allowed && selected != null,
+                                    onPressed: () async {
+                                      final controller = ref.read(
+                                        vpnControllerProvider.notifier,
+                                      );
+                                      connected
+                                          ? await controller.disconnectPressed()
+                                          : await controller.connectPressed();
+                                    },
+                                  ),
+                                  if (error != null) ...[
+                                    const SizedBox(height: 8),
+                                    Text(
+                                      error,
+                                      maxLines: 3,
+                                      overflow: TextOverflow.ellipsis,
+                                      textAlign: TextAlign.center,
+                                      style: const TextStyle(
+                                        color: Color(0xFFD14343),
+                                        fontSize: 13,
+                                        fontWeight: FontWeight.w600,
+                                      ),
+                                    ),
+                                  ],
+                                ],
+                              );
+                            },
+                          ),
                         ),
-                        const SizedBox(height: 4),
                         const Text(
                           '连接时长',
                           style: TextStyle(
@@ -236,17 +266,6 @@ class _VpnScreenState extends ConsumerState<VpnScreen> {
                             ),
                           ],
                         ),
-                        if (error != null) ...[
-                          const SizedBox(height: 14),
-                          Text(
-                            error,
-                            textAlign: TextAlign.center,
-                            style: const TextStyle(
-                              color: Color(0xFFD14343),
-                              fontWeight: FontWeight.w600,
-                            ),
-                          ),
-                        ],
                       ],
                     ),
                   ),
@@ -349,12 +368,14 @@ class _CurrentNodeCard extends StatelessWidget {
 
 class _PowerButton extends StatelessWidget {
   const _PowerButton({
+    required this.diameter,
     required this.connected,
     required this.busy,
     required this.disconnecting,
     required this.enabled,
     required this.onPressed,
   });
+  final double diameter;
   final bool connected;
   final bool busy;
   final bool disconnecting;
@@ -363,30 +384,30 @@ class _PowerButton extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) => SizedBox(
-    width: 240,
-    height: 240,
+    width: diameter,
+    height: diameter,
     child: Stack(
       alignment: Alignment.center,
       children: [
         Container(
-          width: 240,
-          height: 240,
+          width: diameter,
+          height: diameter,
           decoration: const BoxDecoration(
             shape: BoxShape.circle,
             color: Color(0xFFE9EDF7),
           ),
         ),
         Container(
-          width: 220,
-          height: 220,
+          width: diameter * (220 / 240),
+          height: diameter * (220 / 240),
           decoration: const BoxDecoration(
             shape: BoxShape.circle,
             color: Color(0xFFE1E7F3),
           ),
         ),
         Container(
-          width: 178,
-          height: 178,
+          width: diameter * (178 / 240),
+          height: diameter * (178 / 240),
           decoration: BoxDecoration(
             shape: BoxShape.circle,
             color: connected

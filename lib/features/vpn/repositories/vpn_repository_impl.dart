@@ -228,10 +228,19 @@ class VpnRepositoryImpl implements VpnRepository {
       },
     );
     await engine.initializeV2Ray();
-    final allowed = await engine.requestPermission();
-    if (!allowed) throw Exception('未获得 VPN 权限');
     final parser = FlutterV2ray.parseFromURL(node.raw);
     final config = buildAndroidV2rayConfig(parser.getFullConfiguration());
+    final delay = await engine
+        .getServerDelay(
+          config: config,
+          url: 'https://www.gstatic.com/generate_204',
+        )
+        .timeout(const Duration(seconds: 10), onTimeout: () => -1);
+    if (delay < 0) {
+      throw Exception('${node.name} 在当前移动网络不可用，正在切换线路');
+    }
+    final allowed = await engine.requestPermission();
+    if (!allowed) throw Exception('未获得 VPN 权限');
     _v2rayReady = Completer<void>();
     await engine.startV2Ray(
       remark: parser.remark,
@@ -272,7 +281,7 @@ class VpnRepositoryImpl implements VpnRepository {
           await _v2ray?.stopV2Ray();
         } catch (_) {}
         _v2rayConnected = false;
-        await Future.delayed(const Duration(milliseconds: 300));
+        await Future.delayed(const Duration(seconds: 1));
       }
     }
     throw lastError ?? Exception('订阅中没有可用节点');
@@ -280,12 +289,26 @@ class VpnRepositoryImpl implements VpnRepository {
 
   List<SubscriptionNode> _candidateNodes(SubscriptionNode selected) {
     final result = <SubscriptionNode>[selected];
-    for (final node in availableNodes()) {
-      if (node.raw != selected.raw) result.add(node);
-      if (result.length >= 6) break;
+    final alternatives =
+        availableNodes().where((node) => node.raw != selected.raw).toList()
+          ..sort(
+            (a, b) => _androidPortPriority(
+              a.port,
+            ).compareTo(_androidPortPriority(b.port)),
+          );
+    for (final node in alternatives) {
+      result.add(node);
+      if (result.length >= 8) break;
     }
     return result;
   }
+
+  int _androidPortPriority(int port) => switch (port) {
+    2096 => 0,
+    443 => 1,
+    2053 || 2083 || 2087 => 2,
+    _ => 3,
+  };
 
   Future<bool> _verifyAndroidProxy() async {
     if (!Platform.isAndroid || !_v2rayConnected) return false;
