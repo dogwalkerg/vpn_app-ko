@@ -34,6 +34,8 @@ class VpnChannel {
   final _controller = StreamController<VpnStatusEvent>.broadcast();
   Stream<VpnStatusEvent> get onStatus => _controller.stream;
 
+  void report(VpnStatusEvent event) => _controller.add(event);
+
   bool _initialized = false;
 
   Future<void> initialize({String interfaceName = 'vpn_app_tunnel'}) async {
@@ -94,7 +96,9 @@ class VpnChannel {
       final s = await stage();
       _controller.add(VpnStatusEvent(stage: s));
     } catch (e) {
-      _controller.add(VpnStatusEvent(stage: VpnStage.disconnected, reason: '$e'));
+      _controller.add(
+        VpnStatusEvent(stage: VpnStage.disconnected, reason: '$e'),
+      );
     }
   }
 
@@ -106,7 +110,9 @@ class VpnChannel {
     _wg = null;
   }
 
-  Future<void> waitServiceDeleted({Duration timeout = const Duration(seconds: 7)}) async {
+  Future<void> waitServiceDeleted({
+    Duration timeout = const Duration(seconds: 7),
+  }) async {
     if (!Platform.isWindows) return;
     final deadline = DateTime.now().add(timeout);
     while (DateTime.now().isBefore(deadline)) {
@@ -132,4 +138,3 @@ class VpnChannel {
     }
   }
 }
-

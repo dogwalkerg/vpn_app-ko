@@ -217,6 +217,15 @@ class VpnRepositoryImpl implements VpnRepository {
         if (_v2rayConnected && !(_v2rayReady?.isCompleted ?? true)) {
           _v2rayReady!.complete();
         }
+        if (_v2rayConnected) {
+          _vpn.report(
+            VpnStatusEvent(
+              stage: VpnStage.connected,
+              txBytes: status.uploadSpeed,
+              rxBytes: status.downloadSpeed,
+            ),
+          );
+        }
       },
     );
     await engine.initializeV2Ray();
@@ -426,7 +435,6 @@ class VpnRepositoryImpl implements VpnRepository {
         ..writeln('    port: ${uri.port}')
         ..writeln('    uuid: ${quoted(uri.userInfo)}')
         ..writeln('    udp: true')
-        ..writeln('    packet-encoding: xudp')
         ..writeln('    tls: ${query['security'] == 'tls'}')
         ..writeln('    servername: ${quoted(sni)}')
         ..writeln('    client-fingerprint: ${quoted(query['fp'] ?? 'chrome')}')
@@ -510,7 +518,7 @@ class VpnRepositoryImpl implements VpnRepository {
           '10',
           '--proxy',
           'http://127.0.0.1:7890',
-          'https://1.1.1.1/cdn-cgi/trace',
+          'https://www.gstatic.com/generate_204',
         ],
       );
       final output = process.stdout.transform(utf8.decoder).join();
@@ -521,7 +529,8 @@ class VpnRepositoryImpl implements VpnRepository {
           return -1;
         },
       );
-      return exitCode == 0 && (await output).contains('ip=');
+      await output;
+      return exitCode == 0;
     } catch (_) {
       process?.kill();
       return false;

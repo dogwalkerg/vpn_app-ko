@@ -13,6 +13,7 @@ import 'package:vpn_app/features/subscription/providers/subscription_providers.d
 import 'package:vpn_app/features/vpn/models/subscription_node.dart';
 import 'package:vpn_app/features/vpn/providers/subscription_nodes_provider.dart';
 import 'package:vpn_app/features/vpn/providers/vpn_providers.dart';
+import 'package:vpn_app/features/vpn/platform/vpn_channel.dart';
 import 'package:vpn_app/ui/widgets/app_custom_appbar.dart';
 import 'package:vpn_app/ui/widgets/app_drawer.dart';
 import 'package:vpn_app/ui/widgets/themed_scaffold.dart';
@@ -30,13 +31,27 @@ class _VpnScreenState extends ConsumerState<VpnScreen> {
   DateTime? _connectedAt;
   Duration _connectedFor = Duration.zero;
   WebSocket? _trafficSocket;
+  StreamSubscription<VpnStatusEvent>? _nativeTrafficSubscription;
   int _downloadSpeed = 0;
   int _uploadSpeed = 0;
+
+  @override
+  void initState() {
+    super.initState();
+    _nativeTrafficSubscription = VpnChannel().onStatus.listen((event) {
+      if (!mounted || event.txBytes == null || event.rxBytes == null) return;
+      setState(() {
+        _uploadSpeed = event.txBytes!;
+        _downloadSpeed = event.rxBytes!;
+      });
+    });
+  }
 
   @override
   void dispose() {
     _timer?.cancel();
     _trafficSocket?.close();
+    _nativeTrafficSubscription?.cancel();
     super.dispose();
   }
 
