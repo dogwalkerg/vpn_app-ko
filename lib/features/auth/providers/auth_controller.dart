@@ -140,7 +140,8 @@ class AuthController extends StateNotifier<AuthState> {
 
   bool get isLoading => state.isLoading;
   String? get errorMessage => state.errorMessage;
-  bool get isLoggedIn => state is FeatureReady<User>;
+  bool get isLoggedIn =>
+      ref.read(authSessionPhaseProvider) == AuthSessionPhase.signedIn;
 
   Future<void> login(String username, String password) async {
     final generation = ++_authGeneration;
@@ -149,23 +150,38 @@ class AuthController extends StateNotifier<AuthState> {
     try {
       final res = await _login(username, password, cancelToken: ct);
       if (generation != _authGeneration || ct.isCancelled) return;
+      await AppSecureStorage.saveToken(res.token);
+      if (generation != _authGeneration || ct.isCancelled) {
+        await AppSecureStorage.clearTokenIfMatches(res.token);
+        return;
+      }
+
       ref.read(tokenProvider.notifier).state = res.token;
       ref.read(sessionNoticeProvider.notifier).state = null;
-      await AppSecureStorage.saveToken(res.token);
-
       _userCache.set(res.user);
       state = FeatureReady<User>(res.user);
       ref.read(authSessionPhaseProvider.notifier).state =
           AuthSessionPhase.signedIn;
-
-      await ref
-          .read(subscriptionControllerProvider.notifier)
-          .fetch(forceRefresh: true);
-      ref.invalidate(subscriptionNodesProvider);
+      unawaited(_refreshAfterLogin(generation, res.token));
     } on ApiException catch (e) {
       if (!ct.isCancelled) state = FeatureError<User>(e.message);
     } catch (_) {
-      if (!ct.isCancelled) state = const FeatureError<User>("未知错误");
+      if (!ct.isCancelled) {
+        state = const FeatureError<User>('无法保存登录状态，请重试');
+      }
+    }
+  }
+
+  Future<void> _refreshAfterLogin(int generation, String token) async {
+    try {
+      await ref
+          .read(subscriptionControllerProvider.notifier)
+          .fetch(forceRefresh: true);
+      if (generation == _authGeneration && ref.read(tokenProvider) == token) {
+        ref.invalidate(subscriptionNodesProvider);
+      }
+    } catch (_) {
+      // Authentication succeeded; secondary data can retry from the home page.
     }
   }
 

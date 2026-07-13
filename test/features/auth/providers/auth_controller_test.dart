@@ -4,6 +4,7 @@ import 'package:dio/dio.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:vpn_app/core/errors/exceptions.dart';
 import 'package:vpn_app/core/models/feature_state.dart';
 import 'package:vpn_app/core/storage/secure_storage.dart';
@@ -24,6 +25,74 @@ import 'package:vpn_app/features/vpn/usecases/is_connected_usecase.dart';
 
 void main() {
   const user = User(username: 'tester', email: 'tester@example.com');
+
+  setUp(() {
+    FlutterSecureStorage.setMockInitialValues({});
+    SharedPreferences.setMockInitialValues({});
+  });
+
+  test(
+    'successful login persists token before publishing signed-in state',
+    () async {
+      final authRepository = _StubAuthRepository(user: user);
+      final container = _container(authRepository, disconnect: () async {});
+      addTearDown(container.dispose);
+
+      container.read(authControllerProvider);
+      await _waitUntil(
+        () =>
+            container.read(authSessionPhaseProvider) ==
+            AuthSessionPhase.signedOut,
+      );
+
+      await container
+          .read(authControllerProvider.notifier)
+          .login('tester', 'password');
+
+      expect(authRepository.loginCalls, 1);
+      expect(await AppSecureStorage.readToken(), 'login-token');
+      expect(container.read(tokenProvider), 'login-token');
+      expect(
+        container.read(authSessionPhaseProvider),
+        AuthSessionPhase.signedIn,
+      );
+      expect(container.read(authControllerProvider), isA<FeatureReady<User>>());
+    },
+  );
+
+  test(
+    'subscription refresh failure does not undo a successful login',
+    () async {
+      final authRepository = _StubAuthRepository(user: user);
+      final container = _container(
+        authRepository,
+        disconnect: () async {},
+        subscriptionRepository: _StubSubscriptionRepository(
+          fetchError: const ApiException('offline'),
+        ),
+      );
+      addTearDown(container.dispose);
+
+      container.read(authControllerProvider);
+      await _waitUntil(
+        () =>
+            container.read(authSessionPhaseProvider) ==
+            AuthSessionPhase.signedOut,
+      );
+      await container
+          .read(authControllerProvider.notifier)
+          .login('tester', 'password');
+      await Future<void>.delayed(Duration.zero);
+
+      expect(await AppSecureStorage.readToken(), 'login-token');
+      expect(container.read(tokenProvider), 'login-token');
+      expect(
+        container.read(authSessionPhaseProvider),
+        AuthSessionPhase.signedIn,
+      );
+      expect(container.read(authControllerProvider), isA<FeatureReady<User>>());
+    },
+  );
 
   test(
     'persisted token restores the signed-in session before validation',
@@ -214,12 +283,13 @@ void main() {
 ProviderContainer _container(
   _StubAuthRepository authRepository, {
   required Future<void> Function() disconnect,
+  _StubSubscriptionRepository? subscriptionRepository,
 }) {
   return ProviderContainer(
     overrides: [
       authRepositoryProvider.overrideWithValue(authRepository),
       subscriptionRepositoryProvider.overrideWithValue(
-        _StubSubscriptionRepository(),
+        subscriptionRepository ?? _StubSubscriptionRepository(),
       ),
       subscriptionNodesProvider.overrideWith((ref) async => const []),
       vpnControllerProvider.overrideWith(
@@ -271,6 +341,7 @@ class _StubAuthRepository implements AuthRepository {
   final Completer<User>? validation;
   final void Function()? onLogout;
   int validateCalls = 0;
+  int loginCalls = 0;
   int logoutCalls = 0;
   CancelToken? lastValidationToken;
 
@@ -294,7 +365,10 @@ class _StubAuthRepository implements AuthRepository {
     required String username,
     required String password,
     CancelToken? cancelToken,
-  }) => throw UnimplementedError();
+  }) async {
+    loginCalls++;
+    return LoginResult(token: 'login-token', user: user);
+  }
 
   @override
   Future<void> register({
@@ -326,6 +400,10 @@ class _StubAuthRepository implements AuthRepository {
 }
 
 class _StubSubscriptionRepository implements SubscriptionRepository {
+  _StubSubscriptionRepository({this.fetchError});
+
+  final Object? fetchError;
+
   static const status = SubscriptionStatus(
     isTrial: false,
     isPaid: true,
@@ -341,8 +419,10 @@ class _StubSubscriptionRepository implements SubscriptionRepository {
   bool isCacheFresh() => false;
 
   @override
-  Future<SubscriptionStatus> fetchFresh({CancelToken? cancelToken}) async =>
-      status;
+  Future<SubscriptionStatus> fetchFresh({CancelToken? cancelToken}) async {
+    if (fetchError case final error?) throw error;
+    return status;
+  }
 
   @override
   Future<SubscriptionStatus?> applyTrafficSnapshot({
