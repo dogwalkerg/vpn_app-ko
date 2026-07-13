@@ -1,6 +1,4 @@
 import 'dart:async';
-import 'dart:convert';
-import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -10,14 +8,16 @@ import 'package:vpn_app/core/router/routes.dart';
 import 'package:vpn_app/features/auth/providers/auth_providers.dart';
 import 'package:vpn_app/features/subscription/models/subscription_state.dart';
 import 'package:vpn_app/features/subscription/providers/subscription_providers.dart';
+import 'package:vpn_app/features/traffic/providers/traffic_accounting_provider.dart';
 import 'package:vpn_app/features/vpn/models/subscription_node.dart';
 import 'package:vpn_app/features/vpn/providers/subscription_nodes_provider.dart';
 import 'package:vpn_app/features/vpn/providers/vpn_providers.dart';
-import 'package:vpn_app/features/vpn/platform/vpn_channel.dart';
+import 'package:vpn_app/features/vpn/usecases/disconnect_with_traffic.dart';
 import 'package:vpn_app/ui/widgets/app_custom_appbar.dart';
-import 'package:vpn_app/ui/widgets/app_drawer.dart';
 import 'package:vpn_app/ui/widgets/themed_scaffold.dart';
 import 'package:vpn_app/ui/widgets/app_snackbar.dart';
+
+const _lineQualityLabel = '线路质量：★★★★★';
 
 class VpnScreen extends ConsumerStatefulWidget {
   const VpnScreen({super.key});
@@ -32,21 +32,10 @@ class _VpnScreenState extends ConsumerState<VpnScreen> {
   int _tabIndex = 0;
   DateTime? _connectedAt;
   Duration _connectedFor = Duration.zero;
-  WebSocket? _trafficSocket;
-  StreamSubscription<VpnStatusEvent>? _nativeTrafficSubscription;
-  int _downloadSpeed = 0;
-  int _uploadSpeed = 0;
 
   @override
   void initState() {
     super.initState();
-    _nativeTrafficSubscription = VpnChannel().onStatus.listen((event) {
-      if (!mounted || event.txBytes == null || event.rxBytes == null) return;
-      setState(() {
-        _uploadSpeed = event.txBytes!;
-        _downloadSpeed = event.rxBytes!;
-      });
-    });
     _subscriptionRefreshTimer = Timer.periodic(
       const Duration(minutes: 1),
       (_) => _refreshNodes(showFeedback: false),
@@ -57,8 +46,6 @@ class _VpnScreenState extends ConsumerState<VpnScreen> {
   void dispose() {
     _timer?.cancel();
     _subscriptionRefreshTimer?.cancel();
-    _trafficSocket?.close();
-    _nativeTrafficSubscription?.cancel();
     super.dispose();
   }
 
@@ -93,39 +80,11 @@ class _VpnScreenState extends ConsumerState<VpnScreen> {
           );
         }
       });
-      _listenToTraffic();
     } else if (!connected && _connectedAt != null) {
       _timer?.cancel();
       _timer = null;
       _connectedAt = null;
       _connectedFor = Duration.zero;
-      _downloadSpeed = 0;
-      _uploadSpeed = 0;
-      _trafficSocket?.close();
-      _trafficSocket = null;
-    }
-  }
-
-  Future<void> _listenToTraffic() async {
-    if (!Platform.isWindows && !Platform.isMacOS) return;
-    try {
-      final socket = await WebSocket.connect('ws://127.0.0.1:9090/traffic');
-      _trafficSocket = socket;
-      socket.listen(
-        (event) {
-          final data = jsonDecode(event.toString());
-          if (mounted && data is Map<String, dynamic>) {
-            setState(() {
-              _downloadSpeed = (data['down'] as num? ?? 0).toInt();
-              _uploadSpeed = (data['up'] as num? ?? 0).toInt();
-            });
-          }
-        },
-        onDone: () => _trafficSocket = null,
-        onError: (_) => _trafficSocket = null,
-      );
-    } catch (_) {
-      _trafficSocket = null;
     }
   }
 
@@ -136,26 +95,17 @@ class _VpnScreenState extends ConsumerState<VpnScreen> {
     final nodesRefreshing = ref.watch(subscriptionNodesRefreshingProvider);
     final selected = ref.watch(selectedSubscriptionNodeProvider);
     final subscription = ref.watch(subscriptionControllerProvider);
+    final traffic = ref.watch(trafficAccountingProvider);
     final allowed = ref.watch(vpnAccessProvider);
     final connected = vpnState is VpnConnected;
     final disconnecting = vpnState is VpnDisconnecting;
     final busy = vpnState is VpnConnecting || vpnState is VpnDisconnecting;
-    final error = vpnState is VpnError ? vpnState.message : null;
+    final error = vpnState is VpnError ? vpnState.message : traffic.notice;
     WidgetsBinding.instance.addPostFrameCallback((_) => _syncTimer(connected));
 
     return ThemedScaffold(
       overlayColor: const Color(0xFFF2F4F7),
-      appBar: AppCustomAppBar(
-        title: '自由云',
-        leading: Builder(
-          builder: (context) => IconButton(
-            tooltip: '菜单',
-            icon: const Icon(Icons.menu_rounded),
-            onPressed: () => Scaffold.of(context).openDrawer(),
-          ),
-        ),
-      ),
-      drawer: const AppDrawer(),
+      appBar: const AppCustomAppBar(title: '自由云'),
       bottomNavigationBar: _BottomNavigation(
         selectedIndex: _tabIndex,
         onHome: () => setState(() => _tabIndex = 0),
@@ -198,9 +148,18 @@ class _VpnScreenState extends ConsumerState<VpnScreen> {
                                       final controller = ref.read(
                                         vpnControllerProvider.notifier,
                                       );
-                                      connected
-                                          ? await controller.disconnectPressed()
-                                          : await controller.connectPressed();
+                                      if (connected) {
+                                        final accounting = ref.read(
+                                          trafficAccountingProvider.notifier,
+                                        );
+                                        await disconnectWithTrafficSync(
+                                          flushTraffic: accounting.flush,
+                                          disconnectVpn:
+                                              controller.disconnectPressed,
+                                        );
+                                      } else {
+                                        await controller.connectPressed();
+                                      }
                                     },
                                   ),
                                   if (error != null) ...[
@@ -239,7 +198,10 @@ class _VpnScreenState extends ConsumerState<VpnScreen> {
                           ),
                         ),
                         const SizedBox(height: 8),
-                        _TrafficSummary(subscription: subscription),
+                        _TrafficSummary(
+                          subscription: subscription,
+                          pendingBytes: traffic.pendingBytes,
+                        ),
                         const SizedBox(height: 8),
                         Row(
                           children: [
@@ -248,7 +210,7 @@ class _VpnScreenState extends ConsumerState<VpnScreen> {
                                 icon: Icons.arrow_downward_rounded,
                                 label: '下载',
                                 color: const Color(0xFF5966D9),
-                                bytesPerSecond: _downloadSpeed,
+                                bytesPerSecond: traffic.downloadBytesPerSecond,
                               ),
                             ),
                             const SizedBox(width: 12),
@@ -257,7 +219,7 @@ class _VpnScreenState extends ConsumerState<VpnScreen> {
                                 icon: Icons.arrow_upward_rounded,
                                 label: '上传',
                                 color: const Color(0xFF29B765),
-                                bytesPerSecond: _uploadSpeed,
+                                bytesPerSecond: traffic.uploadBytesPerSecond,
                               ),
                             ),
                           ],
@@ -326,7 +288,9 @@ class _CurrentNodeCard extends StatelessWidget {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text(
-                      node?.name ?? (loading ? '正在获取线路' : '智能选择'),
+                      node == null
+                          ? (loading ? '正在获取线路' : '智能选择')
+                          : _nodeDisplayName(node!),
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                       style: const TextStyle(
@@ -337,11 +301,13 @@ class _CurrentNodeCard extends StatelessWidget {
                     ),
                     const SizedBox(height: 2),
                     Text(
-                      node == null ? '选择可用线路' : '${node!.host}:${node!.port}',
+                      node == null ? '选择可用线路' : _lineQualityLabel,
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(
-                        color: Color(0xFF747A84),
+                      style: TextStyle(
+                        color: node == null
+                            ? const Color(0xFF747A84)
+                            : const Color(0xFFE5A514),
                         fontSize: 12,
                       ),
                     ),
@@ -466,8 +432,12 @@ class _PowerButton extends StatelessWidget {
 }
 
 class _TrafficSummary extends StatelessWidget {
-  const _TrafficSummary({required this.subscription});
+  const _TrafficSummary({
+    required this.subscription,
+    required this.pendingBytes,
+  });
   final SubscriptionState subscription;
+  final int pendingBytes;
   @override
   Widget build(BuildContext context) {
     var total = '--';
@@ -476,9 +446,12 @@ class _TrafficSummary extends StatelessWidget {
     if (subscription is SubscriptionReady) {
       final status = (subscription as SubscriptionReady).status;
       total = _bytes(status.trafficTotal);
-      used = _bytes(status.trafficUsed);
+      final displayedUsed = (status.trafficUsed + pendingBytes)
+          .clamp(0, status.trafficTotal)
+          .toInt();
+      used = _bytes(displayedUsed);
       remaining = _bytes(
-        (status.trafficTotal - status.trafficUsed)
+        (status.trafficTotal - displayedUsed)
             .clamp(0, status.trafficTotal)
             .toInt(),
       );
@@ -580,7 +553,7 @@ class _SpeedCard extends StatelessWidget {
                 ),
               ),
               Text(
-                '${_bytes(bytesPerSecond)}/s',
+                _rate(bytesPerSecond),
                 maxLines: 1,
                 style: const TextStyle(
                   color: Color(0xFF202226),
@@ -671,6 +644,7 @@ class _NodePicker extends ConsumerWidget {
                       child: _NodeTile(
                         node: node,
                         selected: selected?.raw == node.raw,
+                        latencyProbe: ref.read(nodeLatencyProbeProvider),
                         onTap: () => _select(context, ref, node),
                       ),
                     );
@@ -724,7 +698,7 @@ class _SmartNodeTile extends StatelessWidget {
     child: _NodeCard(
       icon: Icons.auto_awesome_rounded,
       title: '智能选择',
-      subtitle: '连接时自动验证并切换可用线路',
+      subtitle: _lineQualityLabel,
       selected: false,
       onTap: onTap,
     ),
@@ -735,17 +709,36 @@ class _NodeTile extends StatefulWidget {
   const _NodeTile({
     required this.node,
     required this.selected,
+    required this.latencyProbe,
     required this.onTap,
   });
   final SubscriptionNode node;
   final bool selected;
+  final NodeLatencyProbe latencyProbe;
   final VoidCallback onTap;
+
   @override
   State<_NodeTile> createState() => _NodeTileState();
 }
 
 class _NodeTileState extends State<_NodeTile> {
-  late Future<int?> latency = measureNodeLatency(widget.node);
+  late Future<int?> latency;
+
+  @override
+  void initState() {
+    super.initState();
+    latency = widget.latencyProbe(widget.node);
+  }
+
+  @override
+  void didUpdateWidget(covariant _NodeTile oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.node.raw != widget.node.raw ||
+        oldWidget.latencyProbe != widget.latencyProbe) {
+      latency = widget.latencyProbe(widget.node);
+    }
+  }
+
   @override
   Widget build(BuildContext context) => FutureBuilder<int?>(
     future: latency,
@@ -757,8 +750,9 @@ class _NodeTileState extends State<_NodeTile> {
           : '${snapshot.data} ms';
       return _NodeCard(
         icon: Icons.public_rounded,
-        title: widget.node.name,
-        subtitle: '接入延迟：$value（连接时验证出口）',
+        title: _nodeDisplayName(widget.node),
+        subtitle: _lineQualityLabel,
+        detail: '接入延迟：$value',
         selected: widget.selected,
         onTap: widget.onTap,
       );
@@ -773,10 +767,12 @@ class _NodeCard extends StatelessWidget {
     required this.subtitle,
     required this.selected,
     required this.onTap,
+    this.detail,
   });
   final IconData icon;
   final String title;
   final String subtitle;
+  final String? detail;
   final bool selected;
   final VoidCallback onTap;
   @override
@@ -817,12 +813,26 @@ class _NodeCard extends StatelessWidget {
                     ),
                   ),
                   const SizedBox(height: 5),
-                  Text(
-                    subtitle,
-                    style: const TextStyle(
-                      color: Color(0xFFE5A514),
-                      fontSize: 13,
-                    ),
+                  Wrap(
+                    spacing: 10,
+                    runSpacing: 2,
+                    children: [
+                      Text(
+                        subtitle,
+                        style: const TextStyle(
+                          color: Color(0xFFE5A514),
+                          fontSize: 13,
+                        ),
+                      ),
+                      if (detail != null)
+                        Text(
+                          detail!,
+                          style: const TextStyle(
+                            color: Color(0xFFE5A514),
+                            fontSize: 13,
+                          ),
+                        ),
+                    ],
                   ),
                 ],
               ),
@@ -925,6 +935,7 @@ class _SettingsPanel extends ConsumerWidget {
     final status = subscription is SubscriptionReady
         ? subscription.status
         : null;
+    final subscriptionLabel = _settingsSubscriptionLabel(subscription);
     return Column(
       children: [
         const Padding(
@@ -976,7 +987,7 @@ class _SettingsPanel extends ConsumerWidget {
                           ),
                           const SizedBox(height: 6),
                           Text(
-                            status?.canUse == true ? 'VIP 已激活' : '订阅未激活',
+                            subscriptionLabel,
                             style: const TextStyle(color: Color(0xFFFFCC42)),
                           ),
                           Text(
@@ -995,13 +1006,6 @@ class _SettingsPanel extends ConsumerWidget {
                 title: '会员中心与续费',
                 onTap: () {
                   context.pushNamed(AppRoute.subscription.name);
-                },
-              ),
-              _SettingsItem(
-                icon: Icons.devices_rounded,
-                title: '设备管理',
-                onTap: () {
-                  context.pushNamed(AppRoute.devices.name);
                 },
               ),
               _SettingsItem(
@@ -1077,13 +1081,6 @@ class _SettingsPanel extends ConsumerWidget {
                 },
               ),
               _SettingsItem(
-                icon: Icons.info_outline_rounded,
-                title: '关于应用',
-                onTap: () {
-                  context.pushNamed(AppRoute.about.name);
-                },
-              ),
-              _SettingsItem(
                 icon: Icons.help_outline_rounded,
                 title: '帮助',
                 onTap: () => showDialog<void>(
@@ -1107,8 +1104,19 @@ class _SettingsPanel extends ConsumerWidget {
                 title: '退出账号',
                 danger: true,
                 onTap: () async {
-                  await ref.read(authControllerProvider.notifier).logout();
-                  if (context.mounted) context.goNamed(AppRoute.login.name);
+                  final loggedOut = await ref
+                      .read(authControllerProvider.notifier)
+                      .logout();
+                  if (!context.mounted) return;
+                  if (loggedOut) {
+                    context.goNamed(AppRoute.login.name);
+                  } else {
+                    showAppSnackbar(
+                      context,
+                      text: '流量同步或代理断开失败，请检查网络后重试退出',
+                      type: AppSnackbarType.error,
+                    );
+                  }
                 },
               ),
             ],
@@ -1171,4 +1179,33 @@ String _bytes(int value) {
     unit++;
   }
   return '${amount.toStringAsFixed(unit < 2 ? 0 : 2)} ${units[unit]}';
+}
+
+String _rate(int value) => '${_bytes(value).replaceAll(' ', '')}/s';
+
+String _nodeDisplayName(SubscriptionNode node) {
+  final name = node.name.trim();
+  return name.isEmpty || name == '${node.host}:${node.port}'
+      ? '${node.type} 线路'
+      : name;
+}
+
+String _settingsSubscriptionLabel(SubscriptionState state) {
+  if (state is SubscriptionIdle || state is SubscriptionLoading) {
+    return '正在同步订阅';
+  }
+  if (state is SubscriptionError) return '订阅同步失败';
+  if (state is! SubscriptionReady) return '正在同步订阅';
+
+  final status = state.status;
+  if (status.canUse) return 'VIP 已激活';
+  if (status.trafficTotal > 0 && status.trafficUsed >= status.trafficTotal) {
+    return '流量已用完';
+  }
+
+  final paidUntil = DateTime.tryParse(status.paidUntil ?? '');
+  if (paidUntil != null && !paidUntil.isAfter(DateTime.now())) {
+    return '会员已到期';
+  }
+  return '订阅未激活';
 }

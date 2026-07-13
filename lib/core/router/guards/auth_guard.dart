@@ -8,7 +8,6 @@ class AuthGuard {
     '/register',
     '/verify',
     '/reset',
-    '/about',
   };
 
   static bool _isPublic(GoRouterState state) {

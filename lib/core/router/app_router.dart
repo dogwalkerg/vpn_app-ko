@@ -1,4 +1,4 @@
-﻿// lib/core/router/app_router.dart
+// lib/core/router/app_router.dart
 import 'package:flutter/widgets.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
@@ -10,9 +10,7 @@ import '../../features/auth/screens/register_screen.dart';
 import '../../features/auth/screens/verification_screen.dart';
 import '../../features/auth/screens/reset_password_screen.dart';
 import '../../features/vpn/screens/vpn_screen.dart';
-import '../../features/devices/screens/devices_screen.dart';
 import '../../features/subscription/screens/subscription_screen.dart';
-import '../../features/about/screens/about_screen.dart';
 import '../../features/payments/screens/payment_webview_screen.dart';
 
 import 'guards/auth_guard.dart';
@@ -23,7 +21,10 @@ final rootNavigatorKey = GlobalKey<NavigatorState>();
 class RouterNotifier extends ChangeNotifier {
   final Ref ref;
   RouterNotifier(this.ref) {
-    ref.listen<bool>(isAuthenticatedProvider, (previous, next) => notifyListeners());
+    ref.listen<bool>(
+      isAuthenticatedProvider,
+      (previous, next) => notifyListeners(),
+    );
   }
 
   bool get isLoggedIn => ref.read(isAuthenticatedProvider);
@@ -73,19 +74,9 @@ final routerProvider = Provider<GoRouter>((ref) {
         builder: (context, state) => const VpnScreen(),
       ),
       GoRoute(
-        name: AppRoute.devices.name,
-        path: AppRoute.devices.path,
-        builder: (context, state) => const DevicesScreen(),
-      ),
-      GoRoute(
         name: AppRoute.subscription.name,
         path: AppRoute.subscription.path,
         builder: (context, state) => const SubscriptionScreen(),
-      ),
-      GoRoute(
-        name: AppRoute.about.name,
-        path: AppRoute.about.path,
-        builder: (context, state) => const AboutScreen(),
       ),
       GoRoute(
         name: AppRoute.payment.name,
@@ -121,4 +112,3 @@ final routerProvider = Provider<GoRouter>((ref) {
     },
   );
 }, name: 'appRouter');
-

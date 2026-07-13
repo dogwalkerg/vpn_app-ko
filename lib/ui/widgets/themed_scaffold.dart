@@ -6,7 +6,6 @@ class ThemedScaffold extends StatelessWidget {
   final PreferredSizeWidget? appBar;
   final Widget body;
   final Widget? floatingActionButton;
-  final Widget? drawer;
   final Widget? bottomNavigationBar;
   final bool safeArea;
   final Color? overlayColor;
@@ -16,7 +15,6 @@ class ThemedScaffold extends StatelessWidget {
     required this.body,
     this.appBar,
     this.floatingActionButton,
-    this.drawer,
     this.bottomNavigationBar,
     this.safeArea = true,
     this.overlayColor,
@@ -50,7 +48,6 @@ class ThemedScaffold extends StatelessWidget {
         Scaffold(
           backgroundColor: Colors.transparent,
           appBar: appBar,
-          drawer: drawer,
           bottomNavigationBar: bottomNavigationBar,
           floatingActionButton: floatingActionButton,
           body: content,

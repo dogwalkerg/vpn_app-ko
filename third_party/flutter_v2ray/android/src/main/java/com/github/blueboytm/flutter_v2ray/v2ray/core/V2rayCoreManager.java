@@ -12,7 +12,6 @@ import android.content.Intent;
 import android.graphics.Color;
 import android.os.Build;
 import android.os.CountDownTimer;
-import android.net.TrafficStats;
 import android.util.Log;
 
 import androidx.annotation.RequiresApi;
@@ -87,8 +86,6 @@ public final class V2rayCoreManager {
     private CountDownTimer countDownTimer;
     private int seconds, minutes, hours;
     private long totalDownload, totalUpload, uploadSpeed, downloadSpeed;
-    private long lastDeviceDownload = -1;
-    private long lastDeviceUpload = -1;
     private volatile boolean tunnelReady = false;
     private volatile String tunnelError = "";
     private String SERVICE_DURATION = "00:00:00";
@@ -121,16 +118,7 @@ public final class V2rayCoreManager {
                     hours = 0;
                 }
                 if (enable_traffic_statics) {
-                    long currentDownload = TrafficStats.getTotalRxBytes();
-                    long currentUpload = TrafficStats.getTotalTxBytes();
-                    downloadSpeed = lastDeviceDownload >= 0 && currentDownload >= lastDeviceDownload
-                            ? currentDownload - lastDeviceDownload : 0;
-                    uploadSpeed = lastDeviceUpload >= 0 && currentUpload >= lastDeviceUpload
-                            ? currentUpload - lastDeviceUpload : 0;
-                    lastDeviceDownload = currentDownload;
-                    lastDeviceUpload = currentUpload;
-                    totalDownload = totalDownload + downloadSpeed;
-                    totalUpload = totalUpload + uploadSpeed;
+                    collectProxyTraffic();
                 }
                 SERVICE_DURATION = Utilities.convertIntToTwoDigit(hours) + ":" + Utilities.convertIntToTwoDigit(minutes) + ":" + Utilities.convertIntToTwoDigit(seconds);
                 Intent connection_info_intent = new Intent("V2RAY_CONNECTION_INFO");
@@ -164,8 +152,6 @@ public final class V2rayCoreManager {
             downloadSpeed = 0;
             totalDownload = 0;
             totalUpload = 0;
-            lastDeviceDownload = TrafficStats.getTotalRxBytes();
-            lastDeviceUpload = TrafficStats.getTotalTxBytes();
             Log.e(V2rayCoreManager.class.getSimpleName(), "setUpListener => new initialize from " + v2rayServicesListener.getService().getClass().getSimpleName());
         } catch (Exception e) {
             Log.e(V2rayCoreManager.class.getSimpleName(), "setUpListener failed => ", e);
@@ -241,6 +227,10 @@ public final class V2rayCoreManager {
                 notificationManager.cancel(NOTIFICATION_ID);
             }
             if (isV2rayCoreRunning()) {
+                // queryStats returns and resets the Xray counter. Collect once
+                // before stopping so the last sub-second interval is not lost.
+                collectProxyTraffic();
+                broadcastConnectionInfo();
                 v2RayPoint.stopLoop();
                 v2rayServicesListener.stopService();
                 Log.e(V2rayCoreManager.class.getSimpleName(), "stopCore success => v2ray core stopped.");
@@ -262,16 +252,14 @@ public final class V2rayCoreManager {
         uploadSpeed = 0;
         downloadSpeed = 0;
         tunnelReady = false;
-        lastDeviceDownload = -1;
-        lastDeviceUpload = -1;
         if (v2rayServicesListener != null) {
             Intent connection_info_intent = new Intent("V2RAY_CONNECTION_INFO");
             connection_info_intent.putExtra("STATE", V2rayCoreManager.getInstance().V2RAY_STATE);
             connection_info_intent.putExtra("DURATION", SERVICE_DURATION);
             connection_info_intent.putExtra("UPLOAD_SPEED", uploadSpeed);
-            connection_info_intent.putExtra("DOWNLOAD_SPEED", uploadSpeed);
-            connection_info_intent.putExtra("UPLOAD_TRAFFIC", uploadSpeed);
-            connection_info_intent.putExtra("DOWNLOAD_TRAFFIC", uploadSpeed);
+            connection_info_intent.putExtra("DOWNLOAD_SPEED", downloadSpeed);
+            connection_info_intent.putExtra("UPLOAD_TRAFFIC", totalUpload);
+            connection_info_intent.putExtra("DOWNLOAD_TRAFFIC", totalDownload);
             try {
                 v2rayServicesListener.getService().getApplicationContext().sendBroadcast(connection_info_intent);
             } catch (Exception e) {
@@ -280,6 +268,23 @@ public final class V2rayCoreManager {
         }
         if (countDownTimer != null) {
             countDownTimer.cancel();
+        }
+    }
+
+    private synchronized void collectProxyTraffic() {
+        try {
+            // The gomobile API returns the bytes accumulated since the last
+            // query and clears that counter. Only the proxy outbound belongs
+            // to this VPN session; device-wide TrafficStats also includes
+            // unrelated traffic and can count the tunnel transport itself.
+            downloadSpeed = Math.max(0L, v2RayPoint.queryStats("proxy", "downlink"));
+            uploadSpeed = Math.max(0L, v2RayPoint.queryStats("proxy", "uplink"));
+            totalDownload += downloadSpeed;
+            totalUpload += uploadSpeed;
+        } catch (Exception e) {
+            uploadSpeed = 0;
+            downloadSpeed = 0;
+            Log.w(V2rayCoreManager.class.getSimpleName(), "Unable to query proxy traffic", e);
         }
     }
 

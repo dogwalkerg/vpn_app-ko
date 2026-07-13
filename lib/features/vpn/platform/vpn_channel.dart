@@ -10,17 +10,31 @@ import 'package:wireguard_flutter/wireguard_flutter_platform_interface.dart';
 class VpnStatusEvent {
   final VpnStage stage;
   final String? reason;
-  final int? txBytes;
-  final int? rxBytes;
-  final DateTime ts;
+  final int? uploadBytesPerSecond;
+  final int? downloadBytesPerSecond;
+  final int? uploadBytesTotal;
+  final int? downloadBytesTotal;
+  final String? sessionId;
+  final DateTime sampledAt;
 
   VpnStatusEvent({
     required this.stage,
     this.reason,
-    this.txBytes,
-    this.rxBytes,
-    DateTime? ts,
-  }) : ts = ts ?? DateTime.now();
+    this.uploadBytesPerSecond,
+    this.downloadBytesPerSecond,
+    this.uploadBytesTotal,
+    this.downloadBytesTotal,
+    this.sessionId,
+    DateTime? sampledAt,
+  }) : sampledAt = sampledAt ?? DateTime.now();
+
+  /// Compatibility aliases for the existing speed UI. These values are rates,
+  /// not cumulative byte counters.
+  int? get txBytes => uploadBytesPerSecond;
+
+  int? get rxBytes => downloadBytesPerSecond;
+
+  DateTime get ts => sampledAt;
 }
 
 class VpnChannel {

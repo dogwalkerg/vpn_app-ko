@@ -2,6 +2,8 @@
 import 'package:tray_manager/tray_manager.dart' as tray;
 import 'package:vpn_app/features/auth/providers/auth_providers.dart';
 import 'package:vpn_app/features/vpn/providers/vpn_controller.dart';
+import 'package:vpn_app/features/vpn/usecases/disconnect_with_traffic.dart';
+import 'package:vpn_app/features/traffic/providers/traffic_accounting_provider.dart';
 import 'package:window_manager/window_manager.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../router/app_router.dart';
@@ -19,7 +21,9 @@ class TrayManagerHandler with tray.TrayListener {
   Future<void> _initializeTray() async {
     if (_isInitialized) return;
     _isInitialized = true;
-    await tray.TrayManager.instance.setIcon('assets/tray/tray_icon_disconnect.ico');
+    await tray.TrayManager.instance.setIcon(
+      'assets/tray/tray_icon_disconnect.ico',
+    );
     tray.TrayManager.instance.addListener(this);
   }
 
@@ -32,7 +36,8 @@ class TrayManagerHandler with tray.TrayListener {
     final isLoggedIn = container.read(isAuthenticatedProvider);
 
     final bool isConnected = vpnState is VpnConnected;
-    final bool isConnecting = vpnState is VpnConnecting || vpnState is VpnDisconnecting;
+    final bool isConnecting =
+        vpnState is VpnConnecting || vpnState is VpnDisconnecting;
     final menu = tray.Menu(
       items: [
         tray.MenuItem(key: 'show_window', label: '显示窗口'),
@@ -52,7 +57,9 @@ class TrayManagerHandler with tray.TrayListener {
       ],
     );
     await tray.TrayManager.instance.setContextMenu(menu);
-    final iconPath = isConnected ? 'assets/tray/tray_icon_connect.ico' : 'assets/tray/tray_icon_disconnect.ico';
+    final iconPath = isConnected
+        ? 'assets/tray/tray_icon_connect.ico'
+        : 'assets/tray/tray_icon_disconnect.ico';
     await tray.TrayManager.instance.setIcon(iconPath);
   }
 
@@ -78,7 +85,8 @@ class TrayManagerHandler with tray.TrayListener {
     final isLoggedIn = container.read(isAuthenticatedProvider);
 
     final bool isConnected = vpnState is VpnConnected;
-    final bool isConnecting = vpnState is VpnConnecting || vpnState is VpnDisconnecting;
+    final bool isConnecting =
+        vpnState is VpnConnecting || vpnState is VpnDisconnecting;
 
     switch (menuItem.key) {
       case 'show_window':
@@ -94,14 +102,22 @@ class TrayManagerHandler with tray.TrayListener {
         break;
       case 'disconnect':
         try {
-          await vpn.disconnectPressed();
+          final accounting = container.read(trafficAccountingProvider.notifier);
+          await disconnectWithTrafficSync(
+            flushTraffic: accounting.flush,
+            disconnectVpn: vpn.disconnectPressed,
+          );
         } catch (e) {
           logger.e('托盘断开失败: $e');
         }
         break;
       case 'exit':
         try {
-          await vpn.disconnectPressed();
+          final accounting = container.read(trafficAccountingProvider.notifier);
+          await disconnectWithTrafficSync(
+            flushTraffic: accounting.flush,
+            disconnectVpn: vpn.disconnectPressed,
+          );
         } catch (e) {
           logger.e('断开连接失败: $e');
         }

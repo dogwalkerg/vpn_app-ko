@@ -9,9 +9,19 @@ export 'auth_controller.dart';
 // Токен авторизации (читает AuthInterceptor)
 final tokenProvider = StateProvider<String?>((ref) => null, name: 'authToken');
 
+/// Message carried across the auth redirect after a session is invalidated.
+final sessionNoticeProvider = StateProvider<String?>(
+  (ref) => null,
+  name: 'sessionNotice',
+);
+
 // Производные провайдеры от состояния
 final currentUserProvider = Provider<User?>(
-  (ref) => ref.watch(authControllerProvider.select((s) => (s is FeatureReady<User>) ? s.data : null)),
+  (ref) => ref.watch(
+    authControllerProvider.select(
+      (s) => (s is FeatureReady<User>) ? s.data : null,
+    ),
+  ),
   name: 'currentUser',
 );
 

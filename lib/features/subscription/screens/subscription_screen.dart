@@ -1,4 +1,4 @@
-﻿// lib/features/subscription/screens/subscription_screen.dart
+// lib/features/subscription/screens/subscription_screen.dart
 import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -17,6 +17,7 @@ import 'package:vpn_app/features/subscription/models/subscription_plan.dart';
 import 'package:vpn_app/features/subscription/providers/subscription_providers.dart';
 import 'package:vpn_app/features/subscription/models/subscription_state.dart';
 import 'package:vpn_app/features/subscription/widgets/subscription_confirming_block.dart';
+import 'package:vpn_app/features/traffic/providers/traffic_accounting_provider.dart';
 import 'package:vpn_app/ui/widgets/app_custom_appbar.dart';
 import 'package:vpn_app/ui/widgets/atoms/primary_button.dart';
 import 'package:vpn_app/ui/widgets/themed_scaffold.dart';
@@ -43,24 +44,34 @@ class _SubscriptionScreenState extends ConsumerState<SubscriptionScreen> {
   void initState() {
     super.initState();
     _plansFuture = _fetchPlans();
-    Future.microtask(() => ref.read(subscriptionControllerProvider.notifier).fetch());
+    Future.microtask(
+      () => ref.read(subscriptionControllerProvider.notifier).fetch(),
+    );
   }
 
   Future<List<SubscriptionPlan>> _fetchPlans() async {
     final list = await ref.read(cocoApiProvider).plans();
     return list
-        .map((e) => SubscriptionPlan.fromJson({
-              'id': e.id, 'name': e.name, 'duration_days': e.durationDays,
-              'traffic_bytes': e.trafficBytes, 'price': e.price, 'status': 1,
-            }))
+        .map(
+          (e) => SubscriptionPlan.fromJson({
+            'id': e.id,
+            'name': e.name,
+            'duration_days': e.durationDays,
+            'traffic_bytes': e.trafficBytes,
+            'price': e.price,
+            'status': 1,
+          }),
+        )
         .where((p) => p.enabled)
         .toList();
   }
 
   // ===== Helpers UI =====
 
-  ThemedScaffold _screen(Widget body) =>
-      ThemedScaffold(appBar: const AppCustomAppBar(title: '订阅'), body: body);
+  ThemedScaffold _screen(Widget body) => ThemedScaffold(
+    appBar: const AppCustomAppBar(title: '订阅'),
+    body: body,
+  );
 
   ({String statusText, String periodText, Color statusColor}) _describeStatus(
     BuildContext context,
@@ -71,25 +82,23 @@ class _SubscriptionScreenState extends ConsumerState<SubscriptionScreen> {
       return (
         statusText: '试用期',
         periodText: '有效期至 ${status.trialEndDate.toLocalDate()}',
-        statusColor: c.info
+        statusColor: c.info,
       );
     }
     if (status.isPaid && status.paidUntil != null) {
       return (
         statusText: '订阅已激活',
         periodText: '至 ${status.paidUntil!.toLocalDate()}',
-        statusColor: c.success
+        statusColor: c.success,
       );
     }
-    return (
-      statusText: '订阅未激活',
-      periodText: '没有有效的订阅',
-      statusColor: c.danger
-    );
+    return (statusText: '订阅未激活', periodText: '没有有效的订阅', statusColor: c.danger);
   }
 
   Future<void> _onSucceededFlow() async {
-    await ref.read(subscriptionControllerProvider.notifier).fetch();
+    await ref
+        .read(subscriptionControllerProvider.notifier)
+        .fetch(forceRefresh: true);
     if (!mounted) return;
 
     if (_isWebViewOpen) {
@@ -106,7 +115,9 @@ class _SubscriptionScreenState extends ConsumerState<SubscriptionScreen> {
     final ctrl = ref.read(paymentControllerProvider.notifier);
     final cfg = ref.read(appConfigProvider);
 
-    if (!_isWebViewOpen && next is PaymentReady && (next.payment.confirmationUrl ?? '').isNotEmpty) {
+    if (!_isWebViewOpen &&
+        next is PaymentReady &&
+        (next.payment.confirmationUrl ?? '').isNotEmpty) {
       _isWebViewOpen = true;
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (!mounted) return;
@@ -147,13 +158,22 @@ class _SubscriptionScreenState extends ConsumerState<SubscriptionScreen> {
   Widget _buildReadyBody(SubscriptionReady ready) {
     final t = context.tokens;
     final c = context.colors;
+    final pendingBytes = ref.watch(
+      trafficAccountingProvider.select((state) => state.pendingBytes),
+    );
+    final displayedUsed = (ready.status.trafficUsed + pendingBytes)
+        .clamp(0, ready.status.trafficTotal)
+        .toInt();
 
     final paymentState = ref.watch(paymentControllerProvider);
     final isLoadingPayment = paymentState is PaymentLoading;
-    final isPolling = paymentState is PaymentPolling &&
+    final isPolling =
+        paymentState is PaymentPolling &&
         (paymentState.payment.status == PaymentStatus.pending ||
             paymentState.payment.status == PaymentStatus.waitingForCapture);
-    final paymentError = paymentState is PaymentFailed ? paymentState.message : null;
+    final paymentError = paymentState is PaymentFailed
+        ? paymentState.message
+        : null;
 
     final desc = _describeStatus(context, ready.status);
 
@@ -172,9 +192,13 @@ class _SubscriptionScreenState extends ConsumerState<SubscriptionScreen> {
                 statusText: desc.statusText,
                 periodText: desc.periodText,
                 statusColor: desc.statusColor,
+                highlighted: ready.status.canUse,
               ),
               SizedBox(height: t.spacing.xl),
-              Text(paymentError, style: t.typography.body.copyWith(color: c.danger)),
+              Text(
+                paymentError,
+                style: t.typography.body.copyWith(color: c.danger),
+              ),
               SizedBox(height: t.spacing.md),
               PrimaryButton(
                 label: '重试',
@@ -197,6 +221,7 @@ class _SubscriptionScreenState extends ConsumerState<SubscriptionScreen> {
               statusText: desc.statusText,
               periodText: desc.periodText,
               statusColor: desc.statusColor,
+              highlighted: ready.status.canUse,
             ),
             SizedBox(height: t.spacing.sm),
             Text(
@@ -205,11 +230,13 @@ class _SubscriptionScreenState extends ConsumerState<SubscriptionScreen> {
             ),
             SizedBox(height: t.spacing.xs),
             Text(
-              'VIP${ready.status.level} · 已用 ${_formatBytes(ready.status.trafficUsed)} / ${_formatBytes(ready.status.trafficTotal)}',
+              'VIP${ready.status.level} · 已用 ${_formatBytes(displayedUsed)} / ${_formatBytes(ready.status.trafficTotal)}',
               style: t.typography.caption.copyWith(color: c.textMuted),
             ),
             SizedBox(height: t.spacing.lg),
-            isPolling ? const SubscriptionConfirmingBlock() : _PlanChooser(plansFuture: _plansFuture),
+            isPolling
+                ? const SubscriptionConfirmingBlock()
+                : _PlanChooser(plansFuture: _plansFuture),
             const Spacer(),
             SizedBox(height: t.spacing.xs),
           ],
@@ -232,7 +259,10 @@ class _SubscriptionScreenState extends ConsumerState<SubscriptionScreen> {
         return _screen(
           Padding(
             padding: t.spacing.all(t.spacing.lg),
-            child: Text('错误: $message', style: t.typography.body.copyWith(color: c.danger)),
+            child: Text(
+              '错误: $message',
+              style: t.typography.body.copyWith(color: c.danger),
+            ),
           ),
         );
       case SubscriptionReady():
@@ -246,21 +276,30 @@ class _SubscriptionScreenState extends ConsumerState<SubscriptionScreen> {
 String _formatBytes(int bytes) {
   const gb = 1024 * 1024 * 1024;
   const tb = gb * 1024;
-  return bytes >= tb ? '${(bytes / tb).toStringAsFixed(2)} TB' : '${(bytes / gb).toStringAsFixed(2)} GB';
+  return bytes >= tb
+      ? '${(bytes / tb).toStringAsFixed(2)} TB'
+      : '${(bytes / gb).toStringAsFixed(2)} GB';
 }
 
-class _PlanChooser extends ConsumerWidget {
+class _PlanChooser extends ConsumerStatefulWidget {
   final Future<List<SubscriptionPlan>> plansFuture;
 
   const _PlanChooser({required this.plansFuture});
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  ConsumerState<_PlanChooser> createState() => _PlanChooserState();
+}
+
+class _PlanChooserState extends ConsumerState<_PlanChooser> {
+  int? _selectedPlanId;
+
+  @override
+  Widget build(BuildContext context) {
     final t = context.tokens;
     final c = context.colors;
 
     return FutureBuilder<List<SubscriptionPlan>>(
-      future: plansFuture,
+      future: widget.plansFuture,
       builder: (context, snap) {
         if (snap.connectionState == ConnectionState.waiting) {
           return const Center(child: CircularProgressIndicator());
@@ -280,7 +319,19 @@ class _PlanChooser extends ConsumerWidget {
             Text('选择套餐', style: t.typography.h3.copyWith(color: c.text)),
             SizedBox(height: t.spacing.sm),
             for (final plan in plans) ...[
-              _PlanTile(plan: plan),
+              _PlanTile(
+                plan: plan,
+                selected: _selectedPlanId == plan.id,
+                onTap: () {
+                  setState(() => _selectedPlanId = plan.id);
+                  showPaymentMethodSheet(
+                    context,
+                    ref,
+                    amount: plan.price,
+                    planId: plan.id,
+                  );
+                },
+              ),
               SizedBox(height: t.spacing.sm),
             ],
           ],
@@ -290,54 +341,90 @@ class _PlanChooser extends ConsumerWidget {
   }
 }
 
-class _PlanTile extends ConsumerWidget {
+class _PlanTile extends StatelessWidget {
   final SubscriptionPlan plan;
+  final bool selected;
+  final VoidCallback onTap;
 
-  const _PlanTile({required this.plan});
+  const _PlanTile({
+    required this.plan,
+    required this.selected,
+    required this.onTap,
+  });
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  Widget build(BuildContext context) {
     final t = context.tokens;
     final c = context.colors;
-    final priceText = plan.price <= 0 ? '免费' : '${plan.price.toStringAsFixed(2)} 自由币';
+    final priceText = plan.price <= 0
+        ? '免费'
+        : '${plan.price.toStringAsFixed(2)} 自由币';
     final trafficText = plan.trafficGb >= 1024
         ? '${(plan.trafficGb / 1024).toStringAsFixed(2)} TB'
         : '${plan.trafficGb.toStringAsFixed(0)} GB';
 
-    return InkWell(
-      borderRadius: t.radii.brMd,
-      onTap: () => showPaymentMethodSheet(
-        context,
-        ref,
-        amount: plan.price,
-        planId: plan.id,
-      ),
-      child: Container(
-        padding: t.spacing.all(t.spacing.md),
-        decoration: BoxDecoration(
-          color: c.bgLight,
-          borderRadius: t.radii.brMd,
-          border: Border.all(color: c.borderMuted),
-        ),
-        child: Row(
-          children: [
-            Icon(Icons.diamond_rounded, color: c.primary, size: t.icons.md),
-            SizedBox(width: t.spacing.sm),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(plan.name, style: t.typography.body.copyWith(color: c.text)),
-                  SizedBox(height: t.spacing.xs),
-                  Text('${plan.days} 天 / $trafficText', style: t.typography.caption.copyWith(color: c.textMuted)),
-                ],
-              ),
+    return Semantics(
+      button: true,
+      selected: selected,
+      label: '${plan.name}，$priceText',
+      child: InkWell(
+        key: ValueKey('subscription-plan-${plan.id}'),
+        borderRadius: t.radii.brMd,
+        onTap: onTap,
+        child: AnimatedContainer(
+          duration: t.durations.fast,
+          curve: Curves.easeOut,
+          padding: t.spacing.all(t.spacing.md),
+          decoration: BoxDecoration(
+            color: selected
+                ? subscriptionHighlightBackground(context)
+                : c.bgLight,
+            borderRadius: t.radii.brMd,
+            border: Border.all(
+              color: selected
+                  ? subscriptionHighlightBorder(context)
+                  : c.borderMuted,
+              width: selected ? 1.5 : 1,
             ),
-            Text(priceText, style: t.typography.body.copyWith(color: c.primary)),
-          ],
+          ),
+          child: Row(
+            children: [
+              Icon(Icons.diamond_rounded, color: c.primary, size: t.icons.md),
+              SizedBox(width: t.spacing.sm),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      plan.name,
+                      style: t.typography.body.copyWith(color: c.text),
+                    ),
+                    SizedBox(height: t.spacing.xs),
+                    Text(
+                      '${plan.days} 天 / $trafficText',
+                      style: t.typography.caption.copyWith(color: c.textMuted),
+                    ),
+                  ],
+                ),
+              ),
+              Text(
+                priceText,
+                style: t.typography.body.copyWith(color: c.primary),
+              ),
+              SizedBox(width: t.spacing.sm),
+              AnimatedOpacity(
+                duration: t.durations.fast,
+                opacity: selected ? 1 : 0,
+                child: Icon(
+                  Icons.check_circle_rounded,
+                  color: subscriptionHighlightBorder(context),
+                  size: t.icons.sm,
+                ),
+              ),
+            ],
+          ),
         ),
       ),
     );
   }
 }
-

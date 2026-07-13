@@ -4,7 +4,8 @@ import 'package:dio/dio.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:vpn_app/core/cache/memory_cache.dart';
 import 'package:vpn_app/core/models/feature_state.dart';
-import 'package:vpn_app/features/subscription/providers/subscription_controller.dart';
+import 'package:vpn_app/features/subscription/providers/subscription_providers.dart';
+import 'package:vpn_app/features/traffic/providers/traffic_accounting_provider.dart';
 import 'package:vpn_app/features/vpn/providers/subscription_nodes_provider.dart';
 import 'package:vpn_app/features/vpn/providers/vpn_controller.dart';
 import '../../../core/errors/exceptions.dart';
@@ -42,6 +43,7 @@ class AuthController extends StateNotifier<AuthState> {
   final ResetPasswordUseCase _resetPassword;
 
   CancelToken? _ct;
+  int _authGeneration = 0;
 
   AuthController(this.ref, repo)
     : _login = LoginUseCase(repo),
@@ -72,7 +74,9 @@ class AuthController extends StateNotifier<AuthState> {
   }
 
   Future<void> _bootstrap() async {
+    final generation = _authGeneration;
     final token = await AppSecureStorage.readToken();
+    if (generation != _authGeneration) return;
     ref.read(tokenProvider.notifier).state = token;
 
     if (token != null) {
@@ -93,16 +97,27 @@ class AuthController extends StateNotifier<AuthState> {
   }
 
   Future<void> _softValidate() async {
+    final generation = _authGeneration;
+    final token = ref.read(tokenProvider);
     try {
       final user = await _validateToken(cancelToken: _replaceToken());
+      if (generation != _authGeneration ||
+          token == null ||
+          ref.read(tokenProvider) != token) {
+        return;
+      }
       _userCache.set(user);
       state = FeatureReady<User>(user);
       await ref
           .read(subscriptionControllerProvider.notifier)
           .fetch(forceRefresh: true);
       ref.invalidate(subscriptionNodesProvider);
+    } on UnauthorizedException {
+      if (generation == _authGeneration && ref.read(tokenProvider) == token) {
+        await clearLocalSession(notice: '登录已过期，请重新登录');
+      }
     } catch (_) {
-      // 静默忽略登出异常。
+      // 静默忽略非认证异常。
     }
   }
 
@@ -111,11 +126,14 @@ class AuthController extends StateNotifier<AuthState> {
   bool get isLoggedIn => state is FeatureReady<User>;
 
   Future<void> login(String username, String password) async {
+    final generation = ++_authGeneration;
     state = const FeatureLoading();
     final ct = _replaceToken();
     try {
       final res = await _login(username, password, cancelToken: ct);
+      if (generation != _authGeneration || ct.isCancelled) return;
       ref.read(tokenProvider.notifier).state = res.token;
+      ref.read(sessionNoticeProvider.notifier).state = null;
       await AppSecureStorage.saveToken(res.token);
 
       _userCache.set(res.user);
@@ -155,10 +173,18 @@ class AuthController extends StateNotifier<AuthState> {
   }
 
   Future<void> validateToken() async {
+    final generation = _authGeneration;
+    final token = ref.read(tokenProvider);
     state = const FeatureLoading();
     final ct = _replaceToken();
     try {
       final user = await _validateToken(cancelToken: ct);
+      if (generation != _authGeneration ||
+          token == null ||
+          ref.read(tokenProvider) != token ||
+          ct.isCancelled) {
+        return;
+      }
       _userCache.set(user);
       state = FeatureReady<User>(user);
       await ref
@@ -166,23 +192,55 @@ class AuthController extends StateNotifier<AuthState> {
           .fetch(forceRefresh: true);
       ref.invalidate(subscriptionNodesProvider);
     } on UnauthorizedException {
-      await logout(silent: true);
-      state = const FeatureIdle();
+      if (generation == _authGeneration && ref.read(tokenProvider) == token) {
+        await clearLocalSession(notice: '登录已过期，请重新登录');
+      }
     } on ApiException catch (e) {
       if (!ct.isCancelled) state = FeatureError<User>(e.message);
     }
   }
 
-  Future<void> logout({bool silent = false}) async {
+  Future<bool> logout({bool silent = false}) async {
+    _authGeneration++;
+    final previousState = state;
     if (!silent) state = const FeatureLoading();
     final ct = _replaceToken();
     try {
+      if (!await ref.read(trafficFlushProvider)()) {
+        if (!silent) state = previousState;
+        return false;
+      }
       await ref.read(vpnControllerProvider.notifier).disconnectPressed();
+      if (!await ref.read(trafficFlushProvider)()) {
+        if (!silent) state = previousState;
+        return false;
+      }
+    } catch (_) {
+      if (!silent) state = previousState;
+      return false;
+    }
+    try {
       await _logout(cancelToken: ct);
     } catch (_) {}
+    await clearLocalSession();
+    return true;
+  }
+
+  /// Clears only local authentication state.
+  ///
+  /// This is used when the backend has already rejected the session. It must
+  /// not call the logout endpoint or alter the VPN connection; those actions
+  /// belong to the caller so restriction handling cannot recurse.
+  Future<void> clearLocalSession({String? notice}) async {
+    _authGeneration++;
+    _cancelActive();
     _userCache.clear();
     ref.read(tokenProvider.notifier).state = null;
+    if (notice != null && notice.trim().isNotEmpty) {
+      ref.read(sessionNoticeProvider.notifier).state = notice.trim();
+    }
     await AppSecureStorage.clearToken();
+    await ref.read(subscriptionControllerProvider.notifier).clearCache();
 
     ref.invalidate(subscriptionControllerProvider);
     ref.invalidate(subscriptionNodesProvider);

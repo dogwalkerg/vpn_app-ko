@@ -41,6 +41,9 @@ class SubscriptionController extends StateNotifier<SubscriptionState> {
 
   Future<void> fetch({bool forceRefresh = false}) async {
     if (forceRefresh) {
+      if (state is! SubscriptionReady) {
+        state = const SubscriptionLoading();
+      }
       await _refresh(throwOnError: true);
       return;
     }
@@ -70,5 +73,33 @@ class SubscriptionController extends StateNotifier<SubscriptionState> {
       }
       if (throwOnError) rethrow;
     }
+  }
+
+  Future<void> applyTrafficSnapshot({
+    required int total,
+    required int used,
+    bool? canUse,
+  }) async {
+    final updated = await _repo.applyTrafficSnapshot(
+      total: total,
+      used: used,
+      canUse: canUse,
+    );
+    if (mounted && updated != null) {
+      state = SubscriptionReady(updated);
+    }
+  }
+
+  Future<void> markBlocked() async {
+    final updated = await _repo.markBlocked();
+    if (mounted && updated != null) {
+      state = SubscriptionReady(updated);
+    }
+  }
+
+  Future<void> clearCache() async {
+    _cancelActive();
+    await _repo.clearCache();
+    if (mounted) state = const SubscriptionIdle();
   }
 }

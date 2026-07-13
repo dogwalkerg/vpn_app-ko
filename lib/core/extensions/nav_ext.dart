@@ -4,7 +4,6 @@ import 'package:go_router/go_router.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import 'package:vpn_app/features/payments/screens/payment_webview_screen.dart';
-import '../router/app_router.dart';
 import '../router/routes.dart';
 import '../../features/auth/providers/auth_providers.dart';
 import '../../features/subscription/providers/subscription_providers.dart';
@@ -16,15 +15,17 @@ extension NavX on BuildContext {
 
   // Auth flow
   void pushRegister() => pushNamed(AppRoute.register.name);
-  void goVerify({required String u, required String e}) =>
-      goNamed(AppRoute.verify.name, queryParameters: <String, dynamic>{'u': u, 'e': e});
-  void pushReset({required String u}) =>
-      pushNamed(AppRoute.reset.name, queryParameters: <String, dynamic>{'u': u});
+  void goVerify({required String u, required String e}) => goNamed(
+    AppRoute.verify.name,
+    queryParameters: <String, dynamic>{'u': u, 'e': e},
+  );
+  void pushReset({required String u}) => pushNamed(
+    AppRoute.reset.name,
+    queryParameters: <String, dynamic>{'u': u},
+  );
 
   // Разделы
-  void pushDevices() => pushNamed(AppRoute.devices.name);
   void pushSubscription() => pushNamed(AppRoute.subscription.name);
-  void pushAbout() => pushNamed(AppRoute.about.name);
 
   // Платёжка
   void pushPayment(PaymentWebViewArgs args) =>
@@ -80,15 +81,3 @@ extension NavX on BuildContext {
     }
   }
 }
-
-// Root навконтекст, когда нужно дернуть вне дерева
-BuildContext get rootCtx {
-  final ctx = rootNavigatorKey.currentContext;
-  assert(ctx != null, 'rootNavigatorKey.currentContext is null: router not ready yet');
-  if (ctx == null) {
-    throw StateError('Root navigator context is not available yet');
-  }
-  return ctx;
-}
-
-BuildContext? get rootCtxOrNull => rootNavigatorKey.currentContext;

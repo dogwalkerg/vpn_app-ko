@@ -17,7 +17,7 @@ class SubscriptionRepositoryImpl implements SubscriptionRepository {
     this.api, {
     this.ttl = const Duration(seconds: 60),
     required SwrStore swr,
-  }) : _entry = swr.register<SubscriptionStatus>(
+  }) : _entry = swr.register<SubscriptionStatus?>(
          key: SwrKeys.subscription,
          ttl: ttl,
          fetcher: () async {
@@ -33,11 +33,13 @@ class SubscriptionRepositoryImpl implements SubscriptionRepository {
 
   final ApiService api;
   final Duration ttl;
-  final SwrEntry<SubscriptionStatus> _entry;
+  final SwrEntry<SubscriptionStatus?> _entry;
+  int _cacheRevision = 0;
 
   Future<void> _hydrateFromSnapshot() async {
+    final revision = _cacheRevision;
     final snap = await DiskCache.getJson<Map>(SwrKeys.subscription, ttl: ttl);
-    if (snap != null && snap.isNotEmpty) {
+    if (revision == _cacheRevision && snap != null && snap.isNotEmpty) {
       final mapped = subscriptionStatusFromMap(snap.cast<String, dynamic>());
       _entry.setOptimistic(mapped);
     }
@@ -51,11 +53,16 @@ class SubscriptionRepositoryImpl implements SubscriptionRepository {
 
   @override
   Future<SubscriptionStatus> fetchFresh({CancelToken? cancelToken}) async {
+    final revision = _cacheRevision;
     try {
       final data = _toStatusMap(
         await CocoApi(api).userInfo(cancelToken: cancelToken),
       );
       final fresh = subscriptionStatusFromMap(data);
+
+      if (revision != _cacheRevision) {
+        return getCached() ?? fresh;
+      }
 
       // кладём свежие данные и снапшот
       _entry.setOptimistic(fresh);
@@ -64,6 +71,50 @@ class SubscriptionRepositoryImpl implements SubscriptionRepository {
     } on DioException catch (e) {
       throw mapDioError(e);
     }
+  }
+
+  @override
+  Future<SubscriptionStatus?> applyTrafficSnapshot({
+    required int total,
+    required int used,
+    bool? canUse,
+  }) async {
+    final current = getCached();
+    if (current == null) return null;
+    _cacheRevision++;
+    final updated = current.copyWith(
+      trafficTotal: total,
+      trafficUsed: used,
+      canUse: canUse,
+    );
+    await _persist(updated);
+    return updated;
+  }
+
+  @override
+  Future<SubscriptionStatus?> markBlocked() async {
+    final current = getCached();
+    if (current == null) return null;
+    _cacheRevision++;
+    final updated = current.copyWith(canUse: false);
+    await _persist(updated);
+    return updated;
+  }
+
+  @override
+  Future<void> clearCache() async {
+    _cacheRevision++;
+    _entry.clear();
+    try {
+      await DiskCache.remove(SwrKeys.subscription);
+    } catch (_) {}
+  }
+
+  Future<void> _persist(SubscriptionStatus status) async {
+    _entry.setOptimistic(status);
+    try {
+      await DiskCache.putJson(SwrKeys.subscription, _statusToMap(status));
+    } catch (_) {}
   }
 }
 
@@ -79,4 +130,19 @@ Map<String, dynamic> _toStatusMap(CocoUserInfo user) => {
   'traffic_total': user.trafficTotal,
   'traffic_used': user.trafficUsed,
   'level': user.level,
+};
+
+Map<String, dynamic> _statusToMap(SubscriptionStatus status) => {
+  'is_trial': status.isTrial,
+  'trial_end_date': status.trialEndDate,
+  'is_paid': status.isPaid,
+  'paid_until': status.paidUntil,
+  'can_use': status.canUse,
+  'device_count': status.deviceCount,
+  'max_devices': status.maxDevices,
+  'balance': status.balance,
+  'sub_url': status.subUrl,
+  'traffic_total': status.trafficTotal,
+  'traffic_used': status.trafficUsed,
+  'level': status.level,
 };

@@ -28,14 +28,48 @@ class SubscriptionStatus {
     this.level = 0,
   });
 
+  SubscriptionStatus copyWith({
+    bool? isTrial,
+    String? trialEndDate,
+    bool? isPaid,
+    String? paidUntil,
+    bool? canUse,
+    int? deviceCount,
+    int? maxDevices,
+    double? balance,
+    String? subUrl,
+    int? trafficTotal,
+    int? trafficUsed,
+    int? level,
+  }) {
+    return SubscriptionStatus(
+      isTrial: isTrial ?? this.isTrial,
+      trialEndDate: trialEndDate ?? this.trialEndDate,
+      isPaid: isPaid ?? this.isPaid,
+      paidUntil: paidUntil ?? this.paidUntil,
+      canUse: canUse ?? this.canUse,
+      deviceCount: deviceCount ?? this.deviceCount,
+      maxDevices: maxDevices ?? this.maxDevices,
+      balance: balance ?? this.balance,
+      subUrl: subUrl ?? this.subUrl,
+      trafficTotal: trafficTotal ?? this.trafficTotal,
+      trafficUsed: trafficUsed ?? this.trafficUsed,
+      level: level ?? this.level,
+    );
+  }
+
   factory SubscriptionStatus.fromJson(Map<String, dynamic> json) {
     String? str(dynamic v) => v?.toString();
 
     return SubscriptionStatus(
       isTrial: (json['is_trial'] ?? json['isTrial'] ?? false) == true,
-      trialEndDate: str(json['trial_end_date'] ?? json['trialEndDate'] ?? json['end_date']),
+      trialEndDate: str(
+        json['trial_end_date'] ?? json['trialEndDate'] ?? json['end_date'],
+      ),
       isPaid: (json['is_paid'] ?? json['isPaid'] ?? false) == true,
-      paidUntil: str(json['paid_until'] ?? json['paidUntil'] ?? json['end_date']),
+      paidUntil: str(
+        json['paid_until'] ?? json['paidUntil'] ?? json['end_date'],
+      ),
       canUse: (json['can_use'] ?? json['canUse'] ?? false) == true,
       deviceCount: (json['device_count'] ?? json['deviceCount'] ?? 0) as int,
       maxDevices: (json['max_devices'] ?? json['maxDevices'] ?? 3) as int,

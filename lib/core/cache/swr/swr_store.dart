@@ -19,6 +19,7 @@ class SwrEntry<T> {
   final bool revalidateOnResume;
 
   final MemoryCache<T> _cache = MemoryCache<T>();
+  int _generation = 0;
   bool get hasValue => _cache.value != null;
   T? get value => _cache.value;
   bool get isFresh => _cache.value != null && !_cache.isStale(ttl);
@@ -35,9 +36,13 @@ class SwrEntry<T> {
   }
 
   Future<T> refresh() async {
+    final generation = _generation;
     final v = await fetcher();
-    _cache.set(v);
-    return v;
+    if (generation == _generation) {
+      _cache.set(v);
+      return v;
+    }
+    return _cache.value ?? v;
   }
 
   void touch() {
@@ -57,10 +62,17 @@ class SwrEntry<T> {
   }
 
   void setOptimistic(T v) {
+    _generation++;
     _cache.set(v);
   }
 
+  void clear() {
+    _generation++;
+    _cache.clear();
+  }
+
   void mutate(T Function(T? current) updater, {bool revalidate = true}) {
+    _generation++;
     final next = updater(_cache.value);
     if (next != null) {
       _cache.set(next);

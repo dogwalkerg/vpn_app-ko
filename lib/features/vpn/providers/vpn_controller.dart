@@ -56,8 +56,10 @@ class VpnController extends StateNotifier<VpnState> {
     unawaited(bootstrap());
 
     ref.listen<bool>(vpnAccessProvider, (prev, next) async {
-      if (prev == true && next == false && state is VpnConnected) {
-        await disconnectPressed();
+      if (prev == true &&
+          next == false &&
+          (state is VpnConnected || state is VpnConnecting)) {
+        await forceDisconnect();
       }
     });
 
@@ -75,10 +77,19 @@ class VpnController extends StateNotifier<VpnState> {
   final Ref ref;
   StreamSubscription<VpnStatusEvent>? _vpnSub;
   Timer? _connectTimeout;
+  Future<void>? _connectFuture;
+  Future<void>? _disconnectFuture;
+  int _operationGeneration = 0;
 
   Future<void> bootstrap() async {
+    final generation = _operationGeneration;
     try {
       final c = await isConnected();
+      if (generation != _operationGeneration ||
+          _connectFuture != null ||
+          _disconnectFuture != null) {
+        return;
+      }
       state = c ? const VpnConnected() : const VpnIdle();
     } catch (_) {}
   }
@@ -86,6 +97,8 @@ class VpnController extends StateNotifier<VpnState> {
   bool get _canUseVpn => ref.read(vpnAccessProvider);
 
   void _onVpnStatus(VpnStatusEvent e) async {
+    if (state is VpnDisconnecting) return;
+
     if (!_canUseVpn && e.stage == VpnStage.connected) {
       unawaited(disconnect());
       return;
@@ -94,7 +107,9 @@ class VpnController extends StateNotifier<VpnState> {
     switch (e.stage) {
       case VpnStage.connected:
         _connectTimeout?.cancel();
-        if (state is! VpnConnected) state = const VpnConnected();
+        if (state is! VpnConnected && state is! VpnDisconnecting) {
+          state = const VpnConnected();
+        }
         break;
       case VpnStage.disconnected:
         if (state is VpnDisconnecting) {
@@ -118,11 +133,17 @@ class VpnController extends StateNotifier<VpnState> {
   }
 
   Future<void> connectPressed() async {
-    if (state is VpnConnecting || state is VpnDisconnecting) return;
+    if (_connectFuture != null ||
+        _disconnectFuture != null ||
+        state is VpnConnecting ||
+        state is VpnDisconnecting) {
+      return;
+    }
     if (!_canUseVpn) {
       state = const VpnError('订阅未激活，请先开通套餐');
       return;
     }
+    final generation = ++_operationGeneration;
     state = const VpnConnecting();
     _connectTimeout?.cancel();
     _connectTimeout = Timer(const Duration(seconds: 90), () {
@@ -130,25 +151,66 @@ class VpnController extends StateNotifier<VpnState> {
         state = const VpnError('连接超时，请检查节点或网络');
       }
     });
+    final future = Future<void>.sync(connect);
+    _connectFuture = future;
     try {
-      await connect();
+      await future;
+      if (generation != _operationGeneration) return;
       _connectTimeout?.cancel();
+      if (!_canUseVpn) {
+        await forceDisconnect();
+        state = const VpnError('当前账号已不能使用代理，请刷新账号状态');
+        return;
+      }
       if (state is VpnConnecting) state = const VpnConnected();
     } catch (e) {
+      if (generation != _operationGeneration) return;
       _connectTimeout?.cancel();
       state = VpnError(presentableError(e));
+    } finally {
+      if (identical(_connectFuture, future)) _connectFuture = null;
     }
   }
 
   Future<void> disconnectPressed() async {
-    if (state is VpnDisconnecting) return;
+    await forceDisconnect();
+  }
+
+  Future<void> forceDisconnect() {
+    _operationGeneration++;
     _connectTimeout?.cancel();
+    final active = _disconnectFuture;
+    if (active != null) return active;
+    final future = _performDisconnect(_connectFuture);
+    _disconnectFuture = future;
+    return future.whenComplete(() {
+      if (identical(_disconnectFuture, future)) _disconnectFuture = null;
+    });
+  }
+
+  Future<void> _performDisconnect(Future<void>? inFlightConnect) async {
     state = const VpnDisconnecting();
     try {
-      await disconnect();
+      if (inFlightConnect == null) {
+        await disconnect();
+      } else {
+        // The first stop handles resources already created by connect. The
+        // second handles a core that starts after that stop has completed.
+        try {
+          await disconnect();
+        } catch (_) {}
+        try {
+          await inFlightConnect;
+        } catch (_) {}
+        await disconnect();
+      }
+      if (await isConnected()) {
+        throw StateError('代理核心未能完全停止');
+      }
       state = const VpnIdle();
     } catch (e) {
       state = VpnError(presentableError(e));
+      rethrow;
     }
   }
 }

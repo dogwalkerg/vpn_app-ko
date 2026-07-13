@@ -1,4 +1,4 @@
-﻿// lib/features/auth/screens/login_screen.dart
+// lib/features/auth/screens/login_screen.dart
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:vpn_app/core/extensions/context_ext.dart';
@@ -33,28 +33,30 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
     super.dispose();
   }
 
-Future<void> _submit() async {
-  if (!_formKey.currentState!.validate()) return;
+  Future<void> _submit() async {
+    if (!_formKey.currentState!.validate()) return;
 
-  final container = ProviderScope.containerOf(context, listen: false);
+    final container = ProviderScope.containerOf(context, listen: false);
 
-  await container.read(authControllerProvider.notifier)
-      .login(_username.text.trim(), _password.text);
+    await container
+        .read(authControllerProvider.notifier)
+        .login(_username.text.trim(), _password.text);
 
-  if (!mounted) return;
+    if (!mounted) return;
 
-  final state = container.read(authControllerProvider);
-  final err = state.errorMessage;
-  if (err != null) {
-    showAppSnackbar(context, text: err, type: AppSnackbarType.error);
+    final state = container.read(authControllerProvider);
+    final err = state.errorMessage;
+    if (err != null) {
+      showAppSnackbar(context, text: err, type: AppSnackbarType.error);
+    }
   }
-}
 
   @override
   Widget build(BuildContext context) {
     final c = context.colors;
     final t = context.tokens;
     final isLoading = ref.watch(authControllerProvider).isLoading;
+    final sessionNotice = ref.watch(sessionNoticeProvider);
 
     return AuthScaffold(
       title: '登录',
@@ -66,6 +68,23 @@ Future<void> _submit() async {
           children: [
             Icon(Icons.lock, size: t.icons.xl, color: c.primary),
             SizedBox(height: t.spacing.lg),
+            if (sessionNotice != null && sessionNotice.isNotEmpty) ...[
+              Container(
+                width: double.infinity,
+                padding: EdgeInsets.all(t.spacing.sm),
+                decoration: BoxDecoration(
+                  color: c.danger.withValues(alpha: 0.08),
+                  border: Border.all(color: c.danger.withValues(alpha: 0.35)),
+                  borderRadius: BorderRadius.circular(6),
+                ),
+                child: Text(
+                  sessionNotice,
+                  textAlign: TextAlign.center,
+                  style: t.typography.body.copyWith(color: c.danger),
+                ),
+              ),
+              SizedBox(height: t.spacing.sm),
+            ],
             UsernameField(
               controller: _username,
               onSubmitted: (_) => _pwdNode.requestFocus(),
@@ -82,7 +101,11 @@ Future<void> _submit() async {
               onPressed: () {
                 final u = _username.text.trim();
                 if (u.isEmpty) {
-                  showAppSnackbar(context, text: '请输入用户名以重置密码', type: AppSnackbarType.error);
+                  showAppSnackbar(
+                    context,
+                    text: '请输入用户名以重置密码',
+                    type: AppSnackbarType.error,
+                  );
                   return;
                 }
                 context.pushReset(u: u);
@@ -95,19 +118,12 @@ Future<void> _submit() async {
                 child: const CircularProgressIndicator(),
               ),
             SizedBox(height: t.spacing.sm),
-            PrimaryButton(
-              label: '登录',
-              onPressed: isLoading ? null : _submit,
-            ),
+            PrimaryButton(label: '登录', onPressed: isLoading ? null : _submit),
             SizedBox(height: t.spacing.sm),
-            GhostButton(
-              label: '注册账号',
-              onPressed: () => context.pushRegister(),
-            ),
+            GhostButton(label: '注册账号', onPressed: () => context.pushRegister()),
           ],
         ),
       ),
     );
   }
 }
-

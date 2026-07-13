@@ -8,9 +8,7 @@ enum AppRoute {
   verify('/verify'),
   reset('/reset'),
   vpn('/vpn'),
-  devices('/devices'),
   subscription('/subscription'),
-  about('/about'),
   payment('/payment');
 
   final String path;
@@ -18,11 +16,7 @@ enum AppRoute {
 }
 
 extension GoRouterX on GoRouter {
-  void goRoute(
-    AppRoute r, {
-    Map<String, dynamic>? query,
-    Object? extra,
-  }) =>
+  void goRoute(AppRoute r, {Map<String, dynamic>? query, Object? extra}) =>
       goNamed(
         r.name,
         queryParameters: query ?? const <String, dynamic>{},
@@ -33,10 +27,9 @@ extension GoRouterX on GoRouter {
     AppRoute r, {
     Map<String, dynamic>? query,
     Object? extra,
-  }) =>
-      pushNamed<T>(
-        r.name,
-        queryParameters: query ?? const <String, dynamic>{},
-        extra: extra,
-      );
+  }) => pushNamed<T>(
+    r.name,
+    queryParameters: query ?? const <String, dynamic>{},
+    extra: extra,
+  );
 }

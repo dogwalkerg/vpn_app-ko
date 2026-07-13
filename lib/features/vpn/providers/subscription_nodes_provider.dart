@@ -15,11 +15,20 @@ final selectedSubscriptionNodeProvider = StateProvider<SubscriptionNode?>(
 
 final subscriptionNodesRefreshingProvider = StateProvider<bool>((ref) => false);
 
+typedef NodeLatencyProbe = Future<int?> Function(SubscriptionNode node);
+
+final nodeLatencyProbeProvider = Provider<NodeLatencyProbe>(
+  (_) => measureNodeLatency,
+  name: 'nodeLatencyProbe',
+);
+
 final subscriptionNodesProvider = FutureProvider<List<SubscriptionNode>>((
   ref,
 ) async {
   final subState = ref.watch(subscriptionControllerProvider);
-  if (subState is! SubscriptionReady) return const [];
+  if (subState is! SubscriptionReady || !subState.status.canUse) {
+    return const [];
+  }
 
   final subUrl = subState.status.subUrl.trim();
   final text = subUrl.isEmpty || _isBackendSubscriptionUrl(subUrl)

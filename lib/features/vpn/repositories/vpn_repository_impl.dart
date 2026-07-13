@@ -5,9 +5,11 @@ import 'dart:io'
     show
         Directory,
         File,
+        FileMode,
         HttpClient,
         Platform,
         Process,
+        ProcessException,
         ProcessSignal,
         ProcessStartMode,
         Socket;
@@ -22,6 +24,7 @@ import 'package:vpn_app/features/vpn/models/dto/vpn_config_dto.dart';
 import 'package:vpn_app/features/vpn/models/vpn_config.dart';
 import 'package:wireguard_flutter/wireguard_flutter.dart';
 import 'package:flutter_v2ray/flutter_v2ray.dart';
+import 'package:win32_registry/win32_registry.dart';
 
 import '../../../core/api/api_service.dart';
 import '../../../core/errors/error_mapper.dart';
@@ -49,6 +52,9 @@ class VpnRepositoryImpl implements VpnRepository {
   bool _v2rayConnected = false;
   bool _v2raySawConnecting = false;
   Completer<void>? _v2rayReady;
+  Completer<void>? _v2rayStopped;
+  int _v2rayTrafficSessionSequence = 0;
+  String? _v2rayTrafficSessionId;
   Process? _clashProcess;
   bool _clashAttached = false;
   Future<void>? _coreDownload;
@@ -94,6 +100,7 @@ class VpnRepositoryImpl implements VpnRepository {
   Future<void> connect() async {
     final node = selectedNode();
     if (node == null) throw Exception('请先选择节点');
+    await _traceDesktopProxy('connect type=${node.type}');
     if (node.raw.startsWith('vless://') ||
         node.raw.startsWith('vmess://') ||
         node.raw.startsWith('trojan://') ||
@@ -166,34 +173,52 @@ class VpnRepositoryImpl implements VpnRepository {
 
   @override
   Future<void> disconnect() async {
-    if (_clashProcess != null || _clashAttached || await _isClashRunning()) {
-      await _setDesktopProxy(false);
-      try {
-        await Dio().post('http://127.0.0.1:9090/shutdown');
-      } catch (_) {
-        _clashProcess?.kill(ProcessSignal.sigterm);
+    if (Platform.isWindows || Platform.isMacOS) {
+      final coreRunning =
+          _clashProcess != null || _clashAttached || await _isClashRunning();
+      final proxyEnabled = await _isDesktopSystemProxyEnabled();
+      await _traceDesktopProxy(
+        'disconnect core=$coreRunning proxy=$proxyEnabled',
+      );
+      if (coreRunning || proxyEnabled) {
+        final ownedProcess = _clashProcess;
+        await _setDesktopProxy(false);
+        if (coreRunning) {
+          try {
+            await Dio(
+              BaseOptions(
+                connectTimeout: const Duration(seconds: 1),
+                receiveTimeout: const Duration(seconds: 1),
+              ),
+            ).post('http://127.0.0.1:9090/shutdown');
+          } catch (_) {
+            ownedProcess?.kill(ProcessSignal.sigterm);
+          }
+        }
+        _clashProcess = null;
+        _clashAttached = false;
+        if (ownedProcess != null) await _waitForClashStopped();
       }
-      _clashProcess = null;
-      _clashAttached = false;
-      await _waitForClashStopped();
-      return;
     }
     if (_v2ray != null) {
-      await _v2ray!.stopV2Ray();
-      _v2rayConnected = false;
-      return;
+      await _stopV2rayAndWait();
     }
     await _vpn.stop();
   }
 
   @override
   Future<bool> isConnected() async {
-    if (_clashProcess != null) return true;
     if (Platform.isWindows || Platform.isMacOS) {
-      _clashAttached = await _isClashRunning();
-      if (_clashAttached) {
-        final usable = await _verifyDesktopProxy();
-        if (usable) return true;
+      final proxyEnabled = await _isDesktopSystemProxyEnabled();
+      await _traceDesktopProxy('isConnected proxy=$proxyEnabled');
+      if (!proxyEnabled) {
+        _clashAttached = false;
+      } else {
+        _clashAttached = await _isClashRunning();
+        if (_clashAttached && await _verifyDesktopProxy()) {
+          await _traceDesktopProxy('isConnected result=desktop');
+          return true;
+        }
         await _setDesktopProxy(false);
         _clashAttached = false;
       }
@@ -205,6 +230,7 @@ class VpnRepositoryImpl implements VpnRepository {
       _v2rayConnected = false;
     }
     final s = await _vpn.stage();
+    await _traceDesktopProxy('isConnected stage=$s');
     return s == VpnStage.connected;
   }
 
@@ -217,6 +243,9 @@ class VpnRepositoryImpl implements VpnRepository {
         final state = status.state.toUpperCase();
         if (state == 'CONNECTING') _v2raySawConnecting = true;
         _v2rayConnected = state == 'CONNECTED';
+        if (state == 'DISCONNECTED' && !(_v2rayStopped?.isCompleted ?? true)) {
+          _v2rayStopped!.complete();
+        }
         if (_v2rayConnected && !(_v2rayReady?.isCompleted ?? true)) {
           _v2rayReady!.complete();
         }
@@ -229,15 +258,22 @@ class VpnRepositoryImpl implements VpnRepository {
             ),
           );
         }
-        if (_v2rayConnected) {
-          _vpn.report(
-            VpnStatusEvent(
-              stage: VpnStage.connected,
-              txBytes: status.uploadSpeed,
-              rxBytes: status.downloadSpeed,
-            ),
-          );
-        }
+        final stage = switch (state) {
+          'CONNECTED' => VpnStage.connected,
+          'CONNECTING' => VpnStage.connecting,
+          _ => VpnStage.disconnected,
+        };
+        _vpn.report(
+          VpnStatusEvent(
+            stage: stage,
+            uploadBytesPerSecond: status.uploadSpeed,
+            downloadBytesPerSecond: status.downloadSpeed,
+            uploadBytesTotal: status.upload,
+            downloadBytesTotal: status.download,
+            sessionId: _v2rayTrafficSessionId,
+            reason: status.error.isEmpty ? null : status.error,
+          ),
+        );
       },
     );
     await engine.initializeV2Ray();
@@ -250,6 +286,9 @@ class VpnRepositoryImpl implements VpnRepository {
     if (!allowed) throw Exception('未获得 VPN 权限');
     _v2rayReady = Completer<void>();
     _v2raySawConnecting = false;
+    _v2rayTrafficSessionId =
+        'android-${DateTime.now().microsecondsSinceEpoch}-'
+        '${++_v2rayTrafficSessionSequence}';
     await engine.startV2Ray(
       remark: parser.remark,
       config: config,
@@ -273,6 +312,32 @@ class VpnRepositoryImpl implements VpnRepository {
       await engine.stopV2Ray();
       _v2rayConnected = false;
       throw Exception('节点已连接但无法访问互联网，请刷新订阅或更换节点');
+    }
+  }
+
+  Future<void> _stopV2rayAndWait({
+    Duration timeout = const Duration(seconds: 8),
+  }) async {
+    final engine = _v2ray;
+    if (engine == null) {
+      _v2rayConnected = false;
+      return;
+    }
+
+    final stopped = Completer<void>();
+    _v2rayStopped = stopped;
+    try {
+      await engine.stopV2Ray();
+      if (_v2rayConnected) {
+        await stopped.future.timeout(timeout);
+      }
+      _v2rayConnected = false;
+    } on TimeoutException {
+      throw StateError('Android VPN 服务停止超时，请稍后重试');
+    } finally {
+      if (identical(_v2rayStopped, stopped)) {
+        _v2rayStopped = null;
+      }
     }
   }
 
@@ -365,7 +430,9 @@ class VpnRepositoryImpl implements VpnRepository {
   }
 
   Future<void> _connectClash(SubscriptionNode node) async {
-    if (await _isClashRunning()) {
+    final existingCore = await _isClashRunning();
+    await _traceDesktopProxy('connectClash existingCore=$existingCore');
+    if (existingCore) {
       var attached = false;
       try {
         await _setDesktopProxy(true);
@@ -393,12 +460,15 @@ class VpnRepositoryImpl implements VpnRepository {
     await _ensureDesktopCore(core);
     if (Platform.isMacOS) await Process.run('chmod', ['+x', core.path]);
 
-    _clashProcess = await Process.start(core.path, [
+    final process = await Process.start(core.path, [
       '-d',
       directory.path,
       '-ext-ctl',
       '127.0.0.1:9090',
     ], mode: ProcessStartMode.detachedWithStdio);
+    _clashProcess = process;
+    unawaited(process.stdout.drain<void>().catchError((_) {}));
+    unawaited(process.stderr.drain<void>().catchError((_) {}));
     await Future.delayed(const Duration(milliseconds: 800));
     await _setDesktopProxy(true);
     if (!await _selectUsableClashNode(node)) {
@@ -482,12 +552,72 @@ class VpnRepositoryImpl implements VpnRepository {
     if (!Platform.isWindows && !Platform.isMacOS) return false;
     try {
       final response = await Dio(
-        BaseOptions(connectTimeout: const Duration(milliseconds: 800)),
+        BaseOptions(
+          connectTimeout: const Duration(milliseconds: 800),
+          receiveTimeout: const Duration(milliseconds: 800),
+          sendTimeout: const Duration(milliseconds: 800),
+        ),
       ).get('http://127.0.0.1:9090/configs');
       return response.statusCode == 200;
     } catch (_) {
       return false;
     }
+  }
+
+  Future<bool> _isDesktopSystemProxyEnabled() async {
+    if (Platform.isWindows) return _isWindowsSystemProxyEnabled();
+    if (Platform.isMacOS) return _isMacSystemProxyEnabled();
+    return false;
+  }
+
+  Future<bool> _isWindowsSystemProxyEnabled() async {
+    const path = r'Software\Microsoft\Windows\CurrentVersion\Internet Settings';
+    try {
+      final key = Registry.openPath(RegistryHive.currentUser, path: path);
+      try {
+        return key.getIntValue('ProxyEnable') == 1 &&
+            windowsProxyServerUsesLocalCore(
+              key.getStringValue('ProxyServer') ?? '',
+            );
+      } finally {
+        key.close();
+      }
+    } catch (_) {
+      return false;
+    }
+  }
+
+  Future<bool> _isMacSystemProxyEnabled() async {
+    const executable = '/usr/sbin/networksetup';
+    final listed = await _runMacNetworkSetup(executable, const [
+      '-listallnetworkservices',
+    ]);
+    if (listed.exitCode != 0) return false;
+    final services = listed.stdout
+        .split(RegExp(r'[\r\n]+'))
+        .skip(1)
+        .map((line) => line.trim())
+        .where((line) => line.isNotEmpty && !line.startsWith('*'));
+    for (final service in services) {
+      for (final command in const ['-getwebproxy', '-getsecurewebproxy']) {
+        final result = await _runMacNetworkSetup(executable, [
+          command,
+          service,
+        ]);
+        if (result.exitCode == 0 &&
+            _macSystemProxyOutputEnabled(result.stdout)) {
+          return true;
+        }
+      }
+    }
+    return false;
+  }
+
+  bool _macSystemProxyOutputEnabled(String output) {
+    final normalized = output.toLowerCase().replaceAll(' ', '');
+    return normalized.contains('enabled:yes') &&
+        normalized.contains('server:127.0.0.1') &&
+        normalized.contains('port:7890');
   }
 
   Future<void> _waitForClashStopped() async {
@@ -602,37 +732,39 @@ class VpnRepositoryImpl implements VpnRepository {
 
   Future<void> _setDesktopProxy(bool enabled) async {
     if (Platform.isWindows) {
-      const key =
-          r'HKCU\Software\Microsoft\Windows\CurrentVersion\Internet Settings';
-      await Process.run('reg', [
-        'add',
-        key,
-        '/v',
-        'ProxyEnable',
-        '/t',
-        'REG_DWORD',
-        '/d',
-        enabled ? '1' : '0',
-        '/f',
-      ]);
-      if (enabled) {
-        await Process.run('reg', [
-          'add',
-          key,
-          '/v',
-          'ProxyServer',
-          '/t',
-          'REG_SZ',
-          '/d',
-          '127.0.0.1:7890',
-          '/f',
-        ]);
+      await _traceDesktopProxy('setProxy requested=$enabled');
+      const path =
+          r'Software\Microsoft\Windows\CurrentVersion\Internet Settings';
+      final key = Registry.openPath(
+        RegistryHive.currentUser,
+        path: path,
+        desiredAccessRights: AccessRights.allAccess,
+      );
+      try {
+        key.createValue(RegistryValue.int32('ProxyEnable', enabled ? 1 : 0));
+        if (enabled) {
+          key.createValue(
+            const RegistryValue.string('ProxyServer', '127.0.0.1:7890'),
+          );
+        }
+        final proxyEnabled = key.getIntValue('ProxyEnable') == 1;
+        final endpointMatches = windowsProxyServerUsesLocalCore(
+          key.getStringValue('ProxyServer') ?? '',
+        );
+        if (proxyEnabled != enabled || (enabled && !endpointMatches)) {
+          throw Exception(
+            enabled
+                ? 'Windows system proxy did not enable on 127.0.0.1:7890'
+                : 'Windows system proxy did not disable',
+          );
+        }
+        await _traceDesktopProxy(
+          'setProxy verified=$proxyEnabled endpoint=$endpointMatches',
+        );
+      } finally {
+        key.close();
       }
-      await Process.run('RunDll32.exe', [
-        'InetCpl.cpl,ClearMyTracksByProcess',
-        '8',
-      ]);
-      await Process.run('netsh', [
+      await _runWindowsCommand('netsh', [
         'winhttp',
         enabled ? 'set' : 'reset',
         'proxy',
@@ -642,41 +774,98 @@ class VpnRepositoryImpl implements VpnRepository {
       return;
     }
     if (Platform.isMacOS) {
-      final result = await Process.run('networksetup', [
-        '-listallnetworkservices',
-      ]);
-      final services = result.stdout
-          .toString()
-          .split(RegExp(r'[\r\n]+'))
-          .skip(1)
-          .where((line) => line.trim().isNotEmpty && !line.startsWith('*'));
-      for (final service in services) {
-        if (enabled) {
-          await Process.run('networksetup', [
-            '-setwebproxy',
-            service,
-            '127.0.0.1',
-            '7890',
-          ]);
-          await Process.run('networksetup', [
-            '-setsecurewebproxy',
-            service,
-            '127.0.0.1',
-            '7890',
-          ]);
-        } else {
-          await Process.run('networksetup', [
-            '-setwebproxystate',
-            service,
-            'off',
-          ]);
-          await Process.run('networksetup', [
-            '-setsecurewebproxystate',
-            service,
-            'off',
-          ]);
+      await _setMacSystemProxy(enabled);
+      return;
+    }
+  }
+
+  Future<void> _setMacSystemProxy(bool enabled) async {
+    const executable = '/usr/sbin/networksetup';
+    final listed = await _runMacNetworkSetup(executable, const [
+      '-listallnetworkservices',
+    ]);
+    if (listed.exitCode != 0) {
+      throw Exception('读取 macOS 网络服务失败：${listed.details}');
+    }
+
+    final services = listed.stdout
+        .split(RegExp(r'[\r\n]+'))
+        .skip(1)
+        .map((line) => line.trim())
+        .where((line) => line.isNotEmpty && !line.startsWith('*'))
+        .toList(growable: false);
+    if (services.isEmpty) {
+      throw Exception('未找到可配置的 macOS 网络服务');
+    }
+
+    final failures = <String>[];
+    for (final service in services) {
+      final commands = enabled
+          ? <({String label, List<String> args})>[
+              (
+                label: 'HTTP',
+                args: ['-setwebproxy', service, '127.0.0.1', '7890'],
+              ),
+              (
+                label: 'HTTPS',
+                args: ['-setsecurewebproxy', service, '127.0.0.1', '7890'],
+              ),
+            ]
+          : <({String label, List<String> args})>[
+              (label: 'HTTP', args: ['-setwebproxystate', service, 'off']),
+              (
+                label: 'HTTPS',
+                args: ['-setsecurewebproxystate', service, 'off'],
+              ),
+            ];
+      for (final command in commands) {
+        final result = await _runMacNetworkSetup(executable, command.args);
+        if (result.exitCode != 0) {
+          failures.add('$service ${command.label}：${result.details}');
         }
       }
+    }
+
+    if (failures.isEmpty) return;
+
+    final rollbackFailures = <String>[];
+    if (enabled) {
+      for (final service in services) {
+        for (final command in <({String label, List<String> args})>[
+          (label: 'HTTP', args: ['-setwebproxystate', service, 'off']),
+          (label: 'HTTPS', args: ['-setsecurewebproxystate', service, 'off']),
+        ]) {
+          final result = await _runMacNetworkSetup(executable, command.args);
+          if (result.exitCode != 0) {
+            rollbackFailures.add('$service ${command.label}：${result.details}');
+          }
+        }
+      }
+    }
+
+    final action = enabled ? '设置' : '关闭';
+    final rollback = rollbackFailures.isEmpty
+        ? ''
+        : '；回滚失败：${rollbackFailures.join('；')}';
+    throw Exception('$action macOS 系统代理失败：${failures.join('；')}$rollback');
+  }
+
+  Future<({int exitCode, String stdout, String details})> _runMacNetworkSetup(
+    String executable,
+    List<String> arguments,
+  ) async {
+    try {
+      final result = await Process.run(executable, arguments);
+      final stdout = result.stdout.toString().trim();
+      final stderr = result.stderr.toString().trim();
+      final details = stderr.isNotEmpty
+          ? stderr
+          : stdout.isNotEmpty
+          ? stdout
+          : '退出码 ${result.exitCode}';
+      return (exitCode: result.exitCode, stdout: stdout, details: details);
+    } on ProcessException catch (error) {
+      return (exitCode: -1, stdout: '', details: error.message);
     }
   }
 
@@ -693,12 +882,78 @@ public static class WinInetSettings {
 [WinInetSettings]::InternetSetOption([IntPtr]::Zero, 39, [IntPtr]::Zero, 0) | Out-Null
 [WinInetSettings]::InternetSetOption([IntPtr]::Zero, 37, [IntPtr]::Zero, 0) | Out-Null
 ''';
-    await Process.run('powershell.exe', [
+    await _runWindowsCommand('powershell.exe', [
       '-NoProfile',
       '-NonInteractive',
       '-Command',
       script,
     ]);
+  }
+
+  Future<({int exitCode, String stdout, String details})> _runWindowsCommand(
+    String executable,
+    List<String> arguments, {
+    Duration timeout = const Duration(seconds: 2),
+  }) async {
+    try {
+      final process = await Process.start(executable, arguments);
+      final stdoutFuture = process.stdout
+          .transform(utf8.decoder)
+          .join()
+          .catchError((_) => '');
+      final stderrFuture = process.stderr
+          .transform(utf8.decoder)
+          .join()
+          .catchError((_) => '');
+      var exitCode = -1;
+      var timedOut = false;
+      try {
+        exitCode = await process.exitCode.timeout(timeout);
+      } on TimeoutException {
+        timedOut = true;
+        process.kill(ProcessSignal.sigterm);
+      }
+      final output = await Future.wait([
+        stdoutFuture,
+        stderrFuture,
+      ]).timeout(const Duration(milliseconds: 500), onTimeout: () => ['', '']);
+      final stdout = output[0].trim();
+      final stderr = output[1].trim();
+      final details = timedOut
+          ? 'timed out after ${timeout.inMilliseconds} ms'
+          : stderr.isNotEmpty
+          ? stderr
+          : stdout.isNotEmpty
+          ? stdout
+          : 'exit code $exitCode';
+      return (
+        exitCode: timedOut ? -1 : exitCode,
+        stdout: stdout,
+        details: details,
+      );
+    } on ProcessException catch (error) {
+      return (exitCode: -1, stdout: '', details: error.message);
+    }
+  }
+
+  Future<void> _traceDesktopProxy(String message) async {
+    if (!Platform.isWindows) return;
+    try {
+      final support = await getApplicationSupportDirectory();
+      final file = File(
+        '${support.path}${Platform.pathSeparator}clash'
+        '${Platform.pathSeparator}proxy-events.log',
+      );
+      await file.parent.create(recursive: true);
+      if (await file.exists() && await file.length() > 64 * 1024) {
+        await file.writeAsString('');
+      }
+      await file.writeAsString(
+        '${DateTime.now().toIso8601String()} $message\n',
+        mode: FileMode.append,
+        flush: true,
+      );
+    } catch (_) {}
   }
 
   // --- helpers ---------------------------------------------------------------
@@ -744,4 +999,25 @@ public static class WinInetSettings {
 
     return e;
   }
+}
+
+bool windowsSystemProxyEnabledFromRegistry(
+  String proxyEnableOutput,
+  String proxyServerOutput,
+) {
+  if (!windowsProxyEnabledFromRegistry(proxyEnableOutput)) return false;
+
+  return windowsProxyServerUsesLocalCore(proxyServerOutput);
+}
+
+bool windowsProxyServerUsesLocalCore(String proxyServer) {
+  final server = proxyServer.toLowerCase().replaceAll(' ', '');
+  return server.contains('127.0.0.1:7890') || server.contains('localhost:7890');
+}
+
+bool windowsProxyEnabledFromRegistry(String proxyEnableOutput) {
+  return RegExp(
+    r'ProxyEnable\s+REG_DWORD\s+0x0*1\b',
+    caseSensitive: false,
+  ).hasMatch(proxyEnableOutput);
 }

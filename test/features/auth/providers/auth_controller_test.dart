@@ -1,0 +1,287 @@
+import 'dart:async';
+
+import 'package:dio/dio.dart';
+import 'package:flutter_secure_storage/flutter_secure_storage.dart';
+import 'package:flutter_test/flutter_test.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:vpn_app/core/errors/exceptions.dart';
+import 'package:vpn_app/core/models/feature_state.dart';
+import 'package:vpn_app/core/storage/secure_storage.dart';
+import 'package:vpn_app/features/auth/models/domain/login_result.dart';
+import 'package:vpn_app/features/auth/models/domain/user.dart';
+import 'package:vpn_app/features/auth/providers/auth_providers.dart';
+import 'package:vpn_app/features/auth/repositories/auth_repository.dart';
+import 'package:vpn_app/features/auth/repositories/auth_repository_impl.dart';
+import 'package:vpn_app/features/subscription/models/subscription_status.dart';
+import 'package:vpn_app/features/subscription/providers/subscription_providers.dart';
+import 'package:vpn_app/features/subscription/repositories/subscription_repository.dart';
+import 'package:vpn_app/features/traffic/providers/traffic_accounting_provider.dart';
+import 'package:vpn_app/features/vpn/providers/subscription_nodes_provider.dart';
+import 'package:vpn_app/features/vpn/providers/vpn_controller.dart';
+import 'package:vpn_app/features/vpn/usecases/connect_vpn_usecase.dart';
+import 'package:vpn_app/features/vpn/usecases/disconnect_vpn_usecase.dart';
+import 'package:vpn_app/features/vpn/usecases/is_connected_usecase.dart';
+
+void main() {
+  const user = User(username: 'tester', email: 'tester@example.com');
+
+  test('clearLocalSession does not call the backend or VPN', () async {
+    FlutterSecureStorage.setMockInitialValues({'token': 'stored-token'});
+    final authRepository = _StubAuthRepository(user: user);
+    var disconnectCalls = 0;
+    final container = _container(
+      authRepository,
+      disconnect: () async => disconnectCalls++,
+    );
+    addTearDown(container.dispose);
+
+    await _waitUntil(
+      () => container.read(authControllerProvider) is FeatureReady<User>,
+    );
+
+    await container
+        .read(authControllerProvider.notifier)
+        .clearLocalSession(notice: '账户已禁用');
+
+    expect(container.read(authControllerProvider), isA<FeatureIdle<User>>());
+    expect(container.read(tokenProvider), isNull);
+    expect(container.read(sessionNoticeProvider), '账户已禁用');
+    expect(await AppSecureStorage.readToken(), isNull);
+    expect(authRepository.logoutCalls, 0);
+    expect(disconnectCalls, 0);
+  });
+
+  test('unauthorized validation expires only the local session', () async {
+    FlutterSecureStorage.setMockInitialValues({'token': 'expired-token'});
+    final authRepository = _StubAuthRepository(
+      user: user,
+      validationError: const UnauthorizedException('expired'),
+    );
+    var disconnectCalls = 0;
+    final container = _container(
+      authRepository,
+      disconnect: () async => disconnectCalls++,
+    );
+    addTearDown(container.dispose);
+
+    container.read(authControllerProvider);
+    await _waitUntil(
+      () =>
+          authRepository.validateCalls > 0 &&
+          container.read(tokenProvider) == null,
+    );
+
+    expect(container.read(authControllerProvider), isA<FeatureIdle<User>>());
+    expect(await AppSecureStorage.readToken(), isNull);
+    expect(authRepository.logoutCalls, 0);
+    expect(disconnectCalls, 0);
+  });
+
+  test(
+    'clearLocalSession cancels validation and ignores its delayed success',
+    () async {
+      FlutterSecureStorage.setMockInitialValues({'token': 'stored-token'});
+      final validation = Completer<User>();
+      final authRepository = _StubAuthRepository(
+        user: user,
+        validation: validation,
+      );
+      final container = _container(authRepository, disconnect: () async {});
+      addTearDown(container.dispose);
+
+      container.read(authControllerProvider);
+      await _waitUntil(() => authRepository.validateCalls == 1);
+
+      final validationToken = authRepository.lastValidationToken;
+      expect(validationToken, isNotNull);
+      expect(validationToken!.isCancelled, isFalse);
+
+      await container.read(authControllerProvider.notifier).clearLocalSession();
+
+      expect(validationToken.isCancelled, isTrue);
+      validation.complete(user);
+      await validation.future;
+      await Future<void>.delayed(Duration.zero);
+
+      expect(container.read(authControllerProvider), isA<FeatureIdle<User>>());
+      expect(container.read(tokenProvider), isNull);
+      expect(await AppSecureStorage.readToken(), isNull);
+    },
+  );
+
+  test(
+    'logout keeps disconnect and remote logout before local cleanup',
+    () async {
+      FlutterSecureStorage.setMockInitialValues({'token': 'stored-token'});
+      final events = <String>[];
+      final authRepository = _StubAuthRepository(
+        user: user,
+        onLogout: () => events.add('remote-logout'),
+      );
+      final container = _container(
+        authRepository,
+        disconnect: () async => events.add('disconnect'),
+      );
+      addTearDown(container.dispose);
+
+      await _waitUntil(
+        () => container.read(authControllerProvider) is FeatureReady<User>,
+      );
+
+      await container.read(authControllerProvider.notifier).logout();
+
+      expect(events, ['disconnect', 'remote-logout']);
+      expect(container.read(authControllerProvider), isA<FeatureIdle<User>>());
+      expect(container.read(tokenProvider), isNull);
+      expect(await AppSecureStorage.readToken(), isNull);
+    },
+  );
+}
+
+ProviderContainer _container(
+  _StubAuthRepository authRepository, {
+  required Future<void> Function() disconnect,
+}) {
+  return ProviderContainer(
+    overrides: [
+      authRepositoryProvider.overrideWithValue(authRepository),
+      subscriptionRepositoryProvider.overrideWithValue(
+        _StubSubscriptionRepository(),
+      ),
+      subscriptionNodesProvider.overrideWith((ref) async => const []),
+      vpnControllerProvider.overrideWith(
+        (ref) => _StubVpnController(ref, disconnect),
+      ),
+      connectVpnUseCaseProvider.overrideWithValue(() async {}),
+      disconnectVpnUseCaseProvider.overrideWithValue(disconnect),
+      isVpnConnectedUseCaseProvider.overrideWithValue(() async => false),
+      trafficFlushProvider.overrideWithValue(() async => true),
+    ],
+  );
+}
+
+Future<void> _waitUntil(bool Function() predicate) async {
+  final deadline = DateTime.now().add(const Duration(seconds: 2));
+  while (!predicate()) {
+    if (DateTime.now().isAfter(deadline)) {
+      throw TimeoutException('Timed out waiting for provider state');
+    }
+    await Future<void>.delayed(const Duration(milliseconds: 10));
+  }
+}
+
+class _StubVpnController extends VpnController {
+  _StubVpnController(Ref ref, this.onDisconnect)
+    : super(
+        connect: () async {},
+        disconnect: () async {},
+        isConnected: () async => false,
+        ref: ref,
+      );
+
+  final Future<void> Function() onDisconnect;
+
+  @override
+  Future<void> disconnectPressed() => onDisconnect();
+}
+
+class _StubAuthRepository implements AuthRepository {
+  _StubAuthRepository({
+    required this.user,
+    this.validationError,
+    this.validation,
+    this.onLogout,
+  });
+
+  final User user;
+  final Object? validationError;
+  final Completer<User>? validation;
+  final void Function()? onLogout;
+  int validateCalls = 0;
+  int logoutCalls = 0;
+  CancelToken? lastValidationToken;
+
+  @override
+  Future<User> validateToken({CancelToken? cancelToken}) async {
+    validateCalls++;
+    lastValidationToken = cancelToken;
+    if (validationError case final error?) throw error;
+    if (validation case final pending?) return pending.future;
+    return user;
+  }
+
+  @override
+  Future<void> logout({CancelToken? cancelToken}) async {
+    logoutCalls++;
+    onLogout?.call();
+  }
+
+  @override
+  Future<LoginResult> login({
+    required String username,
+    required String password,
+    CancelToken? cancelToken,
+  }) => throw UnimplementedError();
+
+  @override
+  Future<void> register({
+    required String username,
+    required String email,
+    required String password,
+    CancelToken? cancelToken,
+  }) => throw UnimplementedError();
+
+  @override
+  Future<void> verifyEmail({
+    required String username,
+    required String email,
+    required String verificationCode,
+    CancelToken? cancelToken,
+  }) => throw UnimplementedError();
+
+  @override
+  Future<void> forgotPassword(String username, {CancelToken? cancelToken}) =>
+      throw UnimplementedError();
+
+  @override
+  Future<void> resetPassword({
+    required String username,
+    required String resetCode,
+    required String newPassword,
+    CancelToken? cancelToken,
+  }) => throw UnimplementedError();
+}
+
+class _StubSubscriptionRepository implements SubscriptionRepository {
+  static const status = SubscriptionStatus(
+    isTrial: false,
+    isPaid: true,
+    canUse: true,
+    deviceCount: 0,
+    maxDevices: 0,
+  );
+
+  @override
+  SubscriptionStatus? getCached() => null;
+
+  @override
+  bool isCacheFresh() => false;
+
+  @override
+  Future<SubscriptionStatus> fetchFresh({CancelToken? cancelToken}) async =>
+      status;
+
+  @override
+  Future<SubscriptionStatus?> applyTrafficSnapshot({
+    required int total,
+    required int used,
+    bool? canUse,
+  }) async => status;
+
+  @override
+  Future<SubscriptionStatus?> markBlocked() async =>
+      status.copyWith(canUse: false);
+
+  @override
+  Future<void> clearCache() async {}
+}
