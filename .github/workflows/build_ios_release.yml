@@ -202,10 +202,10 @@ jobs:
           codesign --verify --strict --verbose=2 "${tunnel}"
           codesign -d --entitlements :- "${app}" > "${RUNNER_TEMP}/app-entitlements.plist"
           codesign -d --entitlements :- "${tunnel}" > "${RUNNER_TEMP}/tunnel-entitlements.plist"
-          /usr/libexec/PlistBuddy -c 'Print :com.apple.developer.networking.networkextension:0' "${RUNNER_TEMP}/app-entitlements.plist" | grep -Fx packet-tunnel-provider
-          /usr/libexec/PlistBuddy -c 'Print :com.apple.developer.networking.networkextension:0' "${RUNNER_TEMP}/tunnel-entitlements.plist" | grep -Fx packet-tunnel-provider
-          /usr/libexec/PlistBuddy -c 'Print :com.apple.security.application-groups:0' "${RUNNER_TEMP}/app-entitlements.plist" | grep -Fx group.a3ccc1476ba7bbb2.1
-          /usr/libexec/PlistBuddy -c 'Print :com.apple.security.application-groups:0' "${RUNNER_TEMP}/tunnel-entitlements.plist" | grep -Fx group.a3ccc1476ba7bbb2.1
+          /usr/libexec/PlistBuddy -c 'Print :com.apple.developer.networking.networkextension' "${RUNNER_TEMP}/app-entitlements.plist" | grep -Fq packet-tunnel-provider
+          /usr/libexec/PlistBuddy -c 'Print :com.apple.developer.networking.networkextension' "${RUNNER_TEMP}/tunnel-entitlements.plist" | grep -Fq packet-tunnel-provider
+          /usr/libexec/PlistBuddy -c 'Print :com.apple.security.application-groups' "${RUNNER_TEMP}/app-entitlements.plist" | grep -Fq group.a3ccc1476ba7bbb2.1
+          /usr/libexec/PlistBuddy -c 'Print :com.apple.security.application-groups' "${RUNNER_TEMP}/tunnel-entitlements.plist" | grep -Fq group.a3ccc1476ba7bbb2.1
           cp "${ipa}" "app-ios-${{ inputs.version }}-signed.ipa"
 
       - uses: actions/upload-artifact@v4

@@ -454,7 +454,7 @@ class VpnRepositoryImpl implements VpnRepository {
     _iosVlessStopped = stopped;
     var confirmed = !shouldWait;
     try {
-      await engine.stopVless().timeout(timeout + const Duration(seconds: 4));
+      await engine.stopVless().timeout(timeout + const Duration(seconds: 6));
       if (shouldWait && !stopped.isCompleted) {
         await stopped.future.timeout(timeout);
       }

@@ -519,7 +519,11 @@ public class FlutterVlessPlugin: NSObject, FlutterPlugin, FlutterStreamHandler {
         let results = pendingStopResults
         pendingStopResults.removeAll()
         for result in results {
-            result(error)
+            if let error {
+                result(error)
+            } else {
+                result(nil)
+            }
         }
     }
 
@@ -653,8 +657,9 @@ public class FlutterVlessPlugin: NSObject, FlutterPlugin, FlutterStreamHandler {
             return
         }
         pluginLog.info("initializeVless providerBundleIdentifier=\(providerBundleIdentifier, privacy: .public) groupIdentifier=\(groupIdentifier, privacy: .public)")
-        self.packetTunnelManager = PacketTunnelManager(providerBundleIdentifier: "\(providerBundleIdentifier).XrayTunnel", groupIdentifier: groupIdentifier)
-        self.packetTunnelManager?.statusDidChange = { [weak self] status in
+        let manager = PacketTunnelManager(providerBundleIdentifier: "\(providerBundleIdentifier).XrayTunnel", groupIdentifier: groupIdentifier)
+        self.packetTunnelManager = manager
+        manager.statusDidChange = { [weak self] status in
             guard let self else { return }
             switch status {
             case .connecting, .connected, .reasserting, .disconnecting:
@@ -668,12 +673,15 @@ public class FlutterVlessPlugin: NSObject, FlutterPlugin, FlutterStreamHandler {
                 break
             }
         }
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
-            if self.packetTunnelManager?.connectedDate != nil{
-                self.startTimer(reason: "initialize-existing-connected-date")
+        Task {
+            await manager.initialize()
+            await MainActor.run {
+                if manager.connectedDate != nil {
+                    self.startTimer(reason: "initialize-existing-connected-date")
+                }
+                result(nil)
             }
         }
-        result(nil)
     }
 
     /// Logs only transport-shape metadata, never credentials.
@@ -731,43 +739,45 @@ final class PacketTunnelManager: ObservableObject {
     init(providerBundleIdentifier: String, groupIdentifier: String) {
         self.providerBundleIdentifier = providerBundleIdentifier
         self.groupIdentifier = groupIdentifier
-        isProcessing = true
-        Task(priority: .userInitiated) {
-            await self.reload()
-            await MainActor.run {
-                self.isProcessing = false
-            }
-        }
     }
 
+    func initialize() async {
+        await MainActor.run { self.isProcessing = true }
+        await reload()
+        await MainActor.run { self.isProcessing = false }
+    }
 
     func reload() async {
-        self.cancellables.removeAll()
-        self.manager = await self.loadTunnelProviderManager()
-        pluginLog.info("Reloaded tunnel manager: \(self.manager != nil, privacy: .public)")
-        statusDidChange?(self.status)
-        NotificationCenter.default
-            .publisher(for: .NEVPNConfigurationChange, object: nil)
-            .receive(on: DispatchQueue.main)
-            .sink { [unowned self] _ in
-                pluginLog.info("NEVPNConfigurationChange received")
-                Task(priority: .high) {
-                    self.manager = await self.loadTunnelProviderManager()
-                    await MainActor.run {
-                        self.statusDidChange?(self.status)
+        let loadedManager = await self.loadTunnelProviderManager()
+        await MainActor.run {
+            self.cancellables.removeAll()
+            self.manager = loadedManager
+            pluginLog.info("Reloaded tunnel manager: \(self.manager != nil, privacy: .public)")
+            self.statusDidChange?(self.status)
+            NotificationCenter.default
+                .publisher(for: .NEVPNConfigurationChange, object: nil)
+                .receive(on: DispatchQueue.main)
+                .sink { [unowned self] _ in
+                    pluginLog.info("NEVPNConfigurationChange received")
+                    Task(priority: .high) {
+                        let reloadedManager = await self.loadTunnelProviderManager()
+                        await MainActor.run {
+                            self.manager = reloadedManager
+                            self.statusDidChange?(self.status)
+                        }
                     }
                 }
-            }
-            .store(in: &cancellables)
-        NotificationCenter.default
-            .publisher(for: .NEVPNStatusDidChange)
-            .receive(on: DispatchQueue.main)
-            .sink { [unowned self] _ in
-                pluginLog.info("NEVPNStatusDidChange status=\(self.status?.rawValue ?? -1, privacy: .public)")
-                self.statusDidChange?(self.status)
-                objectWillChange.send()
-            }
-            .store(in: &cancellables)
+                .store(in: &self.cancellables)
+            NotificationCenter.default
+                .publisher(for: .NEVPNStatusDidChange)
+                .receive(on: DispatchQueue.main)
+                .sink { [unowned self] _ in
+                    pluginLog.info("NEVPNStatusDidChange status=\(self.status?.rawValue ?? -1, privacy: .public)")
+                    self.statusDidChange?(self.status)
+                    self.objectWillChange.send()
+                }
+                .store(in: &self.cancellables)
+        }
     }
 
     func saveToPreferences() async throws {
