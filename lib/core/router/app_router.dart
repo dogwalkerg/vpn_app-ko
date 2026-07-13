@@ -21,12 +21,16 @@ final rootNavigatorKey = GlobalKey<NavigatorState>();
 class RouterNotifier extends ChangeNotifier {
   final Ref ref;
   RouterNotifier(this.ref) {
-    ref.listen<bool>(
-      isAuthenticatedProvider,
+    // Creating the controller starts secure-storage session restoration.
+    ref.read(authControllerProvider);
+    ref.listen<AuthSessionPhase>(
+      authSessionPhaseProvider,
       (previous, next) => notifyListeners(),
     );
   }
 
+  bool get isRestoring =>
+      ref.read(authSessionPhaseProvider) == AuthSessionPhase.restoring;
   bool get isLoggedIn => ref.read(isAuthenticatedProvider);
 }
 
@@ -94,21 +98,14 @@ final routerProvider = Provider<GoRouter>((ref) {
       ),
     ],
     redirect: (ctx, state) {
-      final isAuth = notifier.isLoggedIn;
-
-      if (state.matchedLocation == AppRoute.gate.path) {
-        return isAuth ? AppRoute.vpn.path : AppRoute.login.path;
-      }
-
-      final authRedir = AuthGuard.redirect(
-        isAuthenticated: isAuth,
+      return AuthGuard.redirect(
+        isSessionRestoring: notifier.isRestoring,
+        isAuthenticated: notifier.isLoggedIn,
         state: state,
+        gatePath: AppRoute.gate.path,
         loginPath: AppRoute.login.path,
         homePath: AppRoute.vpn.path,
       );
-      if (authRedir != null) return authRedir;
-
-      return null;
     },
   );
 }, name: 'appRouter');

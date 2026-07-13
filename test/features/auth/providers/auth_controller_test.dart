@@ -25,6 +25,79 @@ import 'package:vpn_app/features/vpn/usecases/is_connected_usecase.dart';
 void main() {
   const user = User(username: 'tester', email: 'tester@example.com');
 
+  test(
+    'persisted token restores the signed-in session before validation',
+    () async {
+      FlutterSecureStorage.setMockInitialValues({'token': 'stored-token'});
+      final validation = Completer<User>();
+      final authRepository = _StubAuthRepository(
+        user: user,
+        validation: validation,
+      );
+      final container = _container(authRepository, disconnect: () async {});
+      addTearDown(container.dispose);
+
+      container.read(authControllerProvider);
+      await _waitUntil(() => authRepository.validateCalls == 1);
+
+      expect(container.read(tokenProvider), 'stored-token');
+      expect(
+        container.read(authSessionPhaseProvider),
+        AuthSessionPhase.signedIn,
+      );
+      expect(container.read(isAuthenticatedProvider), isTrue);
+
+      validation.complete(user);
+      await _waitUntil(
+        () => container.read(authControllerProvider) is FeatureReady<User>,
+      );
+    },
+  );
+
+  test('missing persisted token completes startup as signed out', () async {
+    FlutterSecureStorage.setMockInitialValues({});
+    final authRepository = _StubAuthRepository(user: user);
+    final container = _container(authRepository, disconnect: () async {});
+    addTearDown(container.dispose);
+
+    container.read(authControllerProvider);
+    await _waitUntil(
+      () =>
+          container.read(authSessionPhaseProvider) ==
+          AuthSessionPhase.signedOut,
+    );
+
+    expect(container.read(tokenProvider), isNull);
+    expect(container.read(isAuthenticatedProvider), isFalse);
+    expect(authRepository.validateCalls, 0);
+  });
+
+  test(
+    'temporary validation failure keeps the persisted session signed in',
+    () async {
+      FlutterSecureStorage.setMockInitialValues({'token': 'stored-token'});
+      final authRepository = _StubAuthRepository(
+        user: user,
+        validationError: const ApiException('offline'),
+      );
+      final container = _container(authRepository, disconnect: () async {});
+      addTearDown(container.dispose);
+
+      container.read(authControllerProvider);
+      await _waitUntil(
+        () => container.read(authControllerProvider) is FeatureError<User>,
+      );
+
+      expect(container.read(tokenProvider), 'stored-token');
+      expect(
+        container.read(authSessionPhaseProvider),
+        AuthSessionPhase.signedIn,
+      );
+      expect(container.read(isAuthenticatedProvider), isTrue);
+      expect(await AppSecureStorage.readToken(), 'stored-token');
+    },
+  );
+
   test('clearLocalSession does not call the backend or VPN', () async {
     FlutterSecureStorage.setMockInitialValues({'token': 'stored-token'});
     final authRepository = _StubAuthRepository(user: user);

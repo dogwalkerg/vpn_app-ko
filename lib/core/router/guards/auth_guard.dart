@@ -16,11 +16,21 @@ class AuthGuard {
   }
 
   static String? redirect({
+    required bool isSessionRestoring,
     required bool isAuthenticated,
     required GoRouterState state,
+    String gatePath = '/gate',
     String loginPath = '/login',
     String homePath = '/vpn',
   }) {
+    if (isSessionRestoring) {
+      return state.matchedLocation == gatePath ? null : gatePath;
+    }
+
+    if (state.matchedLocation == gatePath) {
+      return isAuthenticated ? homePath : loginPath;
+    }
+
     final goingPublic = _isPublic(state);
 
     if (!isAuthenticated && !goingPublic) {

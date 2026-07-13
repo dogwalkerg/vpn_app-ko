@@ -6,6 +6,17 @@ import 'auth_controller.dart';
 
 export 'auth_controller.dart';
 
+enum AuthSessionPhase { restoring, signedIn, signedOut }
+
+/// Tracks whether a persisted session is still being restored at startup.
+///
+/// This is intentionally separate from [AuthState]: loading user data must not
+/// make the router treat a stored session as signed out.
+final authSessionPhaseProvider = StateProvider<AuthSessionPhase>(
+  (ref) => AuthSessionPhase.restoring,
+  name: 'authSessionPhase',
+);
+
 // Токен авторизации (читает AuthInterceptor)
 final tokenProvider = StateProvider<String?>((ref) => null, name: 'authToken');
 
@@ -26,7 +37,7 @@ final currentUserProvider = Provider<User?>(
 );
 
 final isAuthenticatedProvider = Provider<bool>(
-  (ref) => ref.watch(currentUserProvider) != null,
+  (ref) => ref.watch(authSessionPhaseProvider) == AuthSessionPhase.signedIn,
   name: 'isAuthenticated',
 );
 

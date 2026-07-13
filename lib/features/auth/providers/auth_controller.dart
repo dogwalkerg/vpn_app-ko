@@ -75,24 +75,41 @@ class AuthController extends StateNotifier<AuthState> {
 
   Future<void> _bootstrap() async {
     final generation = _authGeneration;
-    final token = await AppSecureStorage.readToken();
-    if (generation != _authGeneration) return;
-    ref.read(tokenProvider.notifier).state = token;
+    try {
+      final token = await AppSecureStorage.readToken();
+      if (generation != _authGeneration) return;
+      ref.read(tokenProvider.notifier).state = token;
 
-    if (token != null) {
+      if (token == null || token.trim().isEmpty) {
+        ref.read(authSessionPhaseProvider.notifier).state =
+            AuthSessionPhase.signedOut;
+        return;
+      }
+
+      // Restore the signed-in shell immediately. User and subscription data
+      // continue refreshing in the background; only a 401 clears the session.
+      ref.read(authSessionPhaseProvider.notifier).state =
+          AuthSessionPhase.signedIn;
       unawaited(
         ref
             .read(subscriptionControllerProvider.notifier)
             .fetch(forceRefresh: true),
       );
-    }
 
-    final cached = _userCache.value;
-    if (token != null && cached != null) {
-      state = FeatureReady<User>(cached);
-      unawaited(_softValidate());
-    } else if (token != null) {
-      await validateToken();
+      final cached = _userCache.value;
+      if (cached != null) {
+        state = FeatureReady<User>(cached);
+        unawaited(_softValidate());
+      } else {
+        await validateToken();
+      }
+    } catch (_) {
+      if (generation == _authGeneration &&
+          ref.read(authSessionPhaseProvider) == AuthSessionPhase.restoring) {
+        ref.read(tokenProvider.notifier).state = null;
+        ref.read(authSessionPhaseProvider.notifier).state =
+            AuthSessionPhase.signedOut;
+      }
     }
   }
 
@@ -138,6 +155,8 @@ class AuthController extends StateNotifier<AuthState> {
 
       _userCache.set(res.user);
       state = FeatureReady<User>(res.user);
+      ref.read(authSessionPhaseProvider.notifier).state =
+          AuthSessionPhase.signedIn;
 
       await ref
           .read(subscriptionControllerProvider.notifier)
@@ -236,6 +255,8 @@ class AuthController extends StateNotifier<AuthState> {
     _cancelActive();
     _userCache.clear();
     ref.read(tokenProvider.notifier).state = null;
+    ref.read(authSessionPhaseProvider.notifier).state =
+        AuthSessionPhase.signedOut;
     if (notice != null && notice.trim().isNotEmpty) {
       ref.read(sessionNoticeProvider.notifier).state = notice.trim();
     }
