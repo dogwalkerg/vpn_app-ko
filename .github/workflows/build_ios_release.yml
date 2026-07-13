@@ -1,0 +1,222 @@
+name: Build signed iOS IPA
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Release version
+        required: true
+        default: 1.0.27
+      publish_release:
+        description: Publish the signed IPA to GitHub Releases
+        type: boolean
+        required: true
+        default: true
+
+permissions:
+  contents: write
+
+env:
+  BASE_URL: https://1api.cnam.ccwu.cc
+  IOS_APP_BUNDLE_ID: app.ocelot3040.maroon4586
+  IOS_TUNNEL_BUNDLE_ID: app.ocelot3040.maroon4586.XrayTunnel
+  IOS_TEAM_ID: E6B2H6W823
+
+jobs:
+  build-ios:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          flutter-version: 3.44.x
+          cache: true
+
+      - name: Resolve Dart dependencies
+        run: flutter pub get
+
+      - name: Validate Dart code
+        run: |
+          flutter analyze
+          flutter test
+
+      - name: Install pinned iOS Xray framework
+        run: bash tool/setup_ios_xray.sh
+
+      - name: Install iOS pods
+        working-directory: ios
+        run: pod install --repo-update
+
+      - name: Compile app and Packet Tunnel without signing
+        run: >-
+          flutter build ios --release --no-codesign
+          --build-name=${{ inputs.version }}
+          --build-number=${{ github.run_number }}
+          --dart-define=BASE_URL=${{ env.BASE_URL }}
+
+      - name: Verify unsigned Packet Tunnel structure
+        run: |
+          set -euo pipefail
+          app="build/ios/iphoneos/Runner.app"
+          tunnel="${app}/PlugIns/XrayTunnel.appex"
+          test -d "${tunnel}"
+          app_id=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "${app}/Info.plist")
+          tunnel_id=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "${tunnel}/Info.plist")
+          test "${app_id}" = "${IOS_APP_BUNDLE_ID}"
+          test "${tunnel_id}" = "${IOS_TUNNEL_BUNDLE_ID}"
+          test -f "${tunnel}/XrayTunnel"
+          find "${tunnel}" -maxdepth 3 -type f -print
+
+      - name: Package unsigned compile-check artifact
+        run: |
+          rm -rf Payload app-ios-unsigned-compile-check.ipa
+          mkdir Payload
+          ditto build/ios/iphoneos/Runner.app Payload/Runner.app
+          ditto -c -k --sequesterRsrc --keepParent Payload app-ios-unsigned-compile-check.ipa
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ios-unsigned-compile-check
+          path: app-ios-unsigned-compile-check.ipa
+          if-no-files-found: error
+
+      - name: Require complete iOS signing secrets
+        env:
+          IOS_P12_BASE64: ${{ secrets.IOS_P12_BASE64 }}
+          IOS_P12_PASSWORD: ${{ secrets.IOS_P12_PASSWORD }}
+          IOS_APP_PROFILE_BASE64: ${{ secrets.IOS_APP_PROFILE_BASE64 }}
+          IOS_TUNNEL_PROFILE_BASE64: ${{ secrets.IOS_TUNNEL_PROFILE_BASE64 }}
+        run: |
+          set -euo pipefail
+          for name in IOS_P12_BASE64 IOS_P12_PASSWORD IOS_APP_PROFILE_BASE64 IOS_TUNNEL_PROFILE_BASE64; do
+            if [[ -z "${!name:-}" ]]; then
+              echo "::error::Missing GitHub secret ${name}"
+              exit 1
+            fi
+          done
+
+      - name: Install distribution certificate and profiles
+        env:
+          IOS_P12_BASE64: ${{ secrets.IOS_P12_BASE64 }}
+          IOS_P12_PASSWORD: ${{ secrets.IOS_P12_PASSWORD }}
+          IOS_APP_PROFILE_BASE64: ${{ secrets.IOS_APP_PROFILE_BASE64 }}
+          IOS_TUNNEL_PROFILE_BASE64: ${{ secrets.IOS_TUNNEL_PROFILE_BASE64 }}
+        run: |
+          set -euo pipefail
+          keychain_path="${RUNNER_TEMP}/ios-signing.keychain-db"
+          keychain_password="$(uuidgen)"
+          p12_path="${RUNNER_TEMP}/distribution.p12"
+          profile_dir="${HOME}/Library/MobileDevice/Provisioning Profiles"
+          mkdir -p "${profile_dir}"
+
+          security create-keychain -p "${keychain_password}" "${keychain_path}"
+          security set-keychain-settings -lut 21600 "${keychain_path}"
+          security unlock-keychain -p "${keychain_password}" "${keychain_path}"
+          security list-keychains -d user -s "${keychain_path}"
+          printf '%s' "${IOS_P12_BASE64}" | /usr/bin/base64 -D > "${p12_path}"
+          security import "${p12_path}" -P "${IOS_P12_PASSWORD}" -A -t cert -f pkcs12 -k "${keychain_path}"
+          security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "${keychain_password}" "${keychain_path}" >/dev/null
+
+          install_profile() {
+            local encoded="$1"
+            local expected_id="$2"
+            local prefix="$3"
+            local raw="${RUNNER_TEMP}/${prefix}.mobileprovision"
+            local plist="${RUNNER_TEMP}/${prefix}.plist"
+            printf '%s' "${encoded}" | /usr/bin/base64 -D > "${raw}"
+            security cms -D -i "${raw}" > "${plist}"
+            local uuid name app_identifier
+            uuid=$(/usr/libexec/PlistBuddy -c 'Print :UUID' "${plist}")
+            name=$(/usr/libexec/PlistBuddy -c 'Print :Name' "${plist}")
+            app_identifier=$(/usr/libexec/PlistBuddy -c 'Print :Entitlements:application-identifier' "${plist}")
+            if [[ "${app_identifier}" != "${IOS_TEAM_ID}.${expected_id}" ]]; then
+              echo "::error::${prefix} profile targets ${app_identifier}, expected ${IOS_TEAM_ID}.${expected_id}"
+              exit 1
+            fi
+            cp "${raw}" "${profile_dir}/${uuid}.mobileprovision"
+            printf '%s' "${name}"
+          }
+
+          app_profile_name=$(install_profile "${IOS_APP_PROFILE_BASE64}" "${IOS_APP_BUNDLE_ID}" app)
+          tunnel_profile_name=$(install_profile "${IOS_TUNNEL_PROFILE_BASE64}" "${IOS_TUNNEL_BUNDLE_ID}" tunnel)
+          {
+            echo "IOS_APP_PROFILE_NAME=${app_profile_name}"
+            echo "IOS_TUNNEL_PROFILE_NAME=${tunnel_profile_name}"
+            echo "IOS_KEYCHAIN_PATH=${keychain_path}"
+          } >> "${GITHUB_ENV}"
+          security find-identity -v -p codesigning "${keychain_path}"
+
+      - name: Create export options
+        run: |
+          cat > "${RUNNER_TEMP}/ExportOptions.plist" <<PLIST
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0">
+          <dict>
+            <key>method</key><string>ad-hoc</string>
+            <key>signingStyle</key><string>manual</string>
+            <key>teamID</key><string>${IOS_TEAM_ID}</string>
+            <key>signingCertificate</key><string>Apple Distribution</string>
+            <key>provisioningProfiles</key>
+            <dict>
+              <key>${IOS_APP_BUNDLE_ID}</key><string>${IOS_APP_PROFILE_NAME}</string>
+              <key>${IOS_TUNNEL_BUNDLE_ID}</key><string>${IOS_TUNNEL_PROFILE_NAME}</string>
+            </dict>
+            <key>stripSwiftSymbols</key><true/>
+            <key>compileBitcode</key><false/>
+          </dict>
+          </plist>
+          PLIST
+
+      - name: Build signed IPA
+        run: >-
+          flutter build ipa --release
+          --build-name=${{ inputs.version }}
+          --build-number=${{ github.run_number }}
+          --dart-define=BASE_URL=${{ env.BASE_URL }}
+          --export-options-plist=${RUNNER_TEMP}/ExportOptions.plist
+
+      - name: Verify signed IPA
+        run: |
+          set -euo pipefail
+          ipa=$(find build/ios/ipa -maxdepth 1 -name '*.ipa' -print -quit)
+          test -n "${ipa}"
+          verify_dir="${RUNNER_TEMP}/ipa-verify"
+          rm -rf "${verify_dir}"
+          mkdir "${verify_dir}"
+          unzip -q "${ipa}" -d "${verify_dir}"
+          app="${verify_dir}/Payload/Runner.app"
+          tunnel="${app}/PlugIns/XrayTunnel.appex"
+          test -d "${tunnel}"
+          codesign --verify --deep --strict --verbose=2 "${app}"
+          codesign --verify --strict --verbose=2 "${tunnel}"
+          codesign -d --entitlements :- "${app}" > "${RUNNER_TEMP}/app-entitlements.plist"
+          codesign -d --entitlements :- "${tunnel}" > "${RUNNER_TEMP}/tunnel-entitlements.plist"
+          /usr/libexec/PlistBuddy -c 'Print :com.apple.developer.networking.networkextension:0' "${RUNNER_TEMP}/app-entitlements.plist" | grep -Fx packet-tunnel-provider
+          /usr/libexec/PlistBuddy -c 'Print :com.apple.developer.networking.networkextension:0' "${RUNNER_TEMP}/tunnel-entitlements.plist" | grep -Fx packet-tunnel-provider
+          cp "${ipa}" "app-ios-${{ inputs.version }}-signed.ipa"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ios-signed-ipa
+          path: app-ios-${{ inputs.version }}-signed.ipa
+          if-no-files-found: error
+
+      - name: Publish iOS release
+        if: ${{ inputs.publish_release }}
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v${{ inputs.version }}
+          name: iOS v${{ inputs.version }}
+          target_commitish: ${{ github.sha }}
+          body: Signed iOS build with Xray Packet Tunnel extension.
+          files: app-ios-${{ inputs.version }}-signed.ipa
+
+      - name: Delete temporary signing keychain
+        if: always()
+        run: |
+          if [[ -n "${IOS_KEYCHAIN_PATH:-}" && -f "${IOS_KEYCHAIN_PATH}" ]]; then
+            security delete-keychain "${IOS_KEYCHAIN_PATH}" || true
+          fi

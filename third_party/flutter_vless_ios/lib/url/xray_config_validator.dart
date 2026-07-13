@@ -1,0 +1,120 @@
+import 'dart:convert';
+
+class XrayConfigValidator {
+  const XrayConfigValidator();
+
+  Map<String, dynamic> validateJsonString(String config) {
+    final decoded = _decodeJson(config);
+    if (decoded is! Map<String, dynamic>) {
+      throw ArgumentError('Xray config must be a JSON object');
+    }
+    validate(decoded);
+    return decoded;
+  }
+
+  void validate(Map<String, dynamic> config) {
+    _validateObjectSection(config, 'log', required: false);
+    _validateObjectSection(config, 'routing', required: false);
+    _validateInbounds(config['inbounds']);
+    _validateOutbounds(config['outbounds']);
+  }
+
+  Object? _decodeJson(String config) {
+    try {
+      return jsonDecode(config);
+    } on FormatException {
+      throw ArgumentError('The provided string is not valid JSON');
+    }
+  }
+
+  void _validateObjectSection(
+    Map<String, dynamic> config,
+    String key, {
+    required bool required,
+  }) {
+    final value = config[key];
+    if (value == null) {
+      if (required) {
+        throw ArgumentError('Xray config must contain "$key"');
+      }
+      return;
+    }
+    if (value is! Map<String, dynamic>) {
+      throw ArgumentError('Xray config "$key" must be a JSON object');
+    }
+  }
+
+  void _validateInbounds(Object? value) {
+    if (value == null) {
+      return;
+    }
+    if (value is! List<dynamic>) {
+      throw ArgumentError('Xray config "inbounds" must be a JSON array');
+    }
+    for (var i = 0; i < value.length; i++) {
+      final inbound = value[i];
+      if (inbound is! Map<String, dynamic>) {
+        throw ArgumentError('Xray inbound at index $i must be a JSON object');
+      }
+      _validateRequiredString(inbound, 'protocol', 'inbound', i);
+      final port = inbound['port'];
+      if (port != null && !_isValidPort(port)) {
+        throw ArgumentError('Xray inbound at index $i has invalid port');
+      }
+    }
+  }
+
+  void _validateOutbounds(Object? value) {
+    if (value is! List<dynamic>) {
+      throw ArgumentError('Xray config must contain an "outbounds" array');
+    }
+    if (value.isEmpty) {
+      throw ArgumentError('Xray config must contain at least one outbound');
+    }
+    for (var i = 0; i < value.length; i++) {
+      final outbound = value[i];
+      if (outbound is! Map<String, dynamic>) {
+        throw ArgumentError('Xray outbound at index $i must be a JSON object');
+      }
+      _validateRequiredString(outbound, 'protocol', 'outbound', i);
+      final streamSettings = outbound['streamSettings'];
+      if (streamSettings != null) {
+        if (streamSettings is! Map<String, dynamic>) {
+          throw ArgumentError(
+            'Xray outbound at index $i has invalid streamSettings',
+          );
+        }
+        final network = streamSettings['network'];
+        if (network != null && (network is! String || network.isEmpty)) {
+          throw ArgumentError(
+            'Xray outbound at index $i has invalid streamSettings.network',
+          );
+        }
+      }
+    }
+  }
+
+  void _validateRequiredString(
+    Map<String, dynamic> section,
+    String key,
+    String sectionName,
+    int index,
+  ) {
+    final value = section[key];
+    if (value is! String || value.isEmpty) {
+      throw ArgumentError(
+        'Xray $sectionName at index $index must contain "$key"',
+      );
+    }
+  }
+
+  bool _isValidPort(Object value) {
+    final port = switch (value) {
+      int raw => raw,
+      num raw => raw.toInt(),
+      String raw => int.tryParse(raw),
+      _ => null,
+    };
+    return port != null && port > 0 && port <= 65535;
+  }
+}

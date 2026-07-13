@@ -24,6 +24,7 @@ import 'package:vpn_app/features/vpn/models/dto/vpn_config_dto.dart';
 import 'package:vpn_app/features/vpn/models/vpn_config.dart';
 import 'package:wireguard_flutter/wireguard_flutter.dart';
 import 'package:flutter_v2ray/flutter_v2ray.dart';
+import 'package:flutter_vless/flutter_vless.dart' as ios_vless;
 import 'package:win32_registry/win32_registry.dart';
 
 import '../../../core/api/api_service.dart';
@@ -49,6 +50,14 @@ class VpnRepositoryImpl implements VpnRepository {
   final void Function(SubscriptionNode) onNodeSelected;
   final VpnChannel _vpn = VpnChannel();
   FlutterV2ray? _v2ray;
+  ios_vless.FlutterVless? _iosVless;
+  Future<void>? _iosVlessInitialization;
+  bool _iosVlessConnected = false;
+  bool _iosVlessSawConnecting = false;
+  Completer<void>? _iosVlessReady;
+  Completer<void>? _iosVlessStopped;
+  int _iosVlessTrafficSessionSequence = 0;
+  String? _iosVlessTrafficSessionId;
   bool _v2rayConnected = false;
   bool _v2raySawConnecting = false;
   Completer<void>? _v2rayReady;
@@ -61,6 +70,8 @@ class VpnRepositoryImpl implements VpnRepository {
 
   static const String _tunnelName = 'vpn_app_tunnel';
   static const String _bundleId = 'com.example.vpn_app';
+  static const String _iosBundleId = 'app.ocelot3040.maroon4586';
+  static const String _iosAppGroup = 'group.a3ccc1476ba7bbb2.1';
 
   Future<void> _ensureInitialized() async {
     await _vpn.initialize(interfaceName: _tunnelName);
@@ -107,6 +118,8 @@ class VpnRepositoryImpl implements VpnRepository {
         node.raw.startsWith('ss://')) {
       if (Platform.isWindows || Platform.isMacOS) {
         await _connectClash(node);
+      } else if (Platform.isIOS) {
+        await _connectIosWithFallback(node);
       } else {
         await _connectAndroidWithFallback(node);
       }
@@ -203,6 +216,10 @@ class VpnRepositoryImpl implements VpnRepository {
     if (_v2ray != null) {
       await _stopV2rayAndWait();
     }
+    if (Platform.isIOS) {
+      await _stopIosVlessAndWait();
+      return;
+    }
     await _vpn.stop();
   }
 
@@ -228,6 +245,10 @@ class VpnRepositoryImpl implements VpnRepository {
       if (usable) return true;
       await _v2ray?.stopV2Ray();
       _v2rayConnected = false;
+    }
+    if (Platform.isIOS) {
+      await _ensureIosVlessInitialized();
+      return _iosVlessConnected;
     }
     final s = await _vpn.stage();
     await _traceDesktopProxy('isConnected stage=$s');
@@ -313,6 +334,166 @@ class VpnRepositoryImpl implements VpnRepository {
       _v2rayConnected = false;
       throw Exception('节点已连接但无法访问互联网，请刷新订阅或更换节点');
     }
+  }
+
+  Future<void> _ensureIosVlessInitialized() async {
+    if (!Platform.isIOS) return;
+    final engine = _iosVless ??= ios_vless.FlutterVless(
+      onStatusChanged: _handleIosVlessStatus,
+    );
+    _iosVlessInitialization ??= engine.initializeVless(
+      providerBundleIdentifier: _iosBundleId,
+      groupIdentifier: _iosAppGroup,
+    );
+    try {
+      await _iosVlessInitialization;
+    } catch (_) {
+      _iosVlessInitialization = null;
+      rethrow;
+    }
+  }
+
+  void _handleIosVlessStatus(ios_vless.VlessStatus status) {
+    final state = status.state.toUpperCase();
+    if (state == 'CONNECTING') _iosVlessSawConnecting = true;
+    _iosVlessConnected = state == 'CONNECTED';
+    if (_iosVlessConnected && !(_iosVlessReady?.isCompleted ?? true)) {
+      _iosVlessReady!.complete();
+    }
+    if (state == 'DISCONNECTED' && !(_iosVlessStopped?.isCompleted ?? true)) {
+      _iosVlessStopped!.complete();
+    }
+    if (state == 'DISCONNECTED' &&
+        _iosVlessSawConnecting &&
+        !(_iosVlessReady?.isCompleted ?? true)) {
+      _iosVlessReady!.completeError(
+        StateError('iOS Packet Tunnel failed to start'),
+      );
+    }
+    final stage = switch (state) {
+      'CONNECTED' => VpnStage.connected,
+      'CONNECTING' => VpnStage.connecting,
+      'DISCONNECTING' => VpnStage.disconnecting,
+      _ => VpnStage.disconnected,
+    };
+    _vpn.report(
+      VpnStatusEvent(
+        stage: stage,
+        uploadBytesPerSecond: status.uploadSpeed,
+        downloadBytesPerSecond: status.downloadSpeed,
+        uploadBytesTotal: status.upload,
+        downloadBytesTotal: status.download,
+        sessionId: _iosVlessTrafficSessionId,
+      ),
+    );
+  }
+
+  Future<void> _connectIosVless(SubscriptionNode node) async {
+    await _ensureIosVlessInitialized();
+    final engine = _iosVless!;
+    final parser = ios_vless.FlutterVless.parse(node.raw);
+    final config = parser.getFullConfiguration();
+    final allowed = await engine.requestPermission();
+    if (!allowed) throw Exception('未获得 iOS VPN 配置权限');
+
+    _iosVlessReady = Completer<void>();
+    _iosVlessSawConnecting = false;
+    _iosVlessTrafficSessionId =
+        'ios-${DateTime.now().microsecondsSinceEpoch}-'
+        '${++_iosVlessTrafficSessionSequence}';
+    await engine.startVless(
+      remark: parser.remark.isEmpty ? node.name : parser.remark,
+      config: config,
+      blockedApps: null,
+      bypassSubnets: null,
+      proxyOnly: false,
+    );
+    try {
+      await _iosVlessReady!.future.timeout(const Duration(seconds: 30));
+    } on TimeoutException {
+      await engine.stopVless();
+      _iosVlessConnected = false;
+      throw Exception('iOS 代理内核启动超时，请刷新订阅或更换节点');
+    }
+    if (!await _verifyIosTunnel()) {
+      await engine.stopVless();
+      _iosVlessConnected = false;
+      throw Exception('节点已连接但无法访问互联网，请刷新订阅或更换节点');
+    }
+  }
+
+  Future<void> _connectIosWithFallback(SubscriptionNode selected) async {
+    Object? lastError;
+    for (final node in _candidateNodes(selected)) {
+      try {
+        await _connectIosVless(node);
+        onNodeSelected(node);
+        return;
+      } catch (error) {
+        lastError = error;
+        try {
+          await _iosVless?.stopVless();
+        } catch (_) {}
+        _iosVlessConnected = false;
+        await Future.delayed(const Duration(milliseconds: 700));
+      }
+    }
+    throw lastError ?? Exception('订阅中没有可用的 iOS 节点');
+  }
+
+  Future<void> _stopIosVlessAndWait({
+    Duration timeout = const Duration(seconds: 6),
+  }) async {
+    final engine = _iosVless;
+    if (engine == null) {
+      _iosVlessConnected = false;
+      return;
+    }
+    final wasConnected = _iosVlessConnected;
+    final stopped = Completer<void>();
+    _iosVlessStopped = stopped;
+    try {
+      await engine.stopVless();
+      if (wasConnected) await stopped.future.timeout(timeout);
+    } on TimeoutException {
+      _vpn.report(
+        VpnStatusEvent(
+          stage: VpnStage.disconnected,
+          sessionId: _iosVlessTrafficSessionId,
+        ),
+      );
+    } finally {
+      _iosVlessConnected = false;
+      _iosVlessSawConnecting = false;
+      if (identical(_iosVlessStopped, stopped)) _iosVlessStopped = null;
+    }
+  }
+
+  Future<bool> _verifyIosTunnel() async {
+    if (!Platform.isIOS || !_iosVlessConnected) return false;
+    final client = Dio(
+      BaseOptions(
+        connectTimeout: const Duration(seconds: 8),
+        receiveTimeout: const Duration(seconds: 8),
+        sendTimeout: const Duration(seconds: 8),
+        validateStatus: (status) =>
+            status != null && status >= 200 && status < 500,
+      ),
+    );
+    for (var attempt = 0; attempt < 3; attempt++) {
+      for (final url in const [
+        'https://cp.cloudflare.com/generate_204',
+        'https://www.gstatic.com/generate_204',
+      ]) {
+        try {
+          final response = await client.get<void>(url);
+          final status = response.statusCode ?? 0;
+          if (status >= 200 && status < 500) return true;
+        } catch (_) {}
+      }
+      await Future.delayed(const Duration(seconds: 1));
+    }
+    return false;
   }
 
   Future<void> _stopV2rayAndWait({
