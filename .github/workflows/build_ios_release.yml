@@ -12,6 +12,26 @@ on:
         type: boolean
         required: true
         default: true
+  workflow_call:
+    inputs:
+      version:
+        description: Release version
+        type: string
+        required: true
+      publish_release:
+        description: Publish the signed IPA to GitHub Releases
+        type: boolean
+        required: false
+        default: true
+    secrets:
+      IOS_P12_BASE64:
+        required: true
+      IOS_P12_PASSWORD:
+        required: true
+      IOS_APP_PROFILE_BASE64:
+        required: true
+      IOS_TUNNEL_PROFILE_BASE64:
+        required: true
 
 permissions:
   contents: write

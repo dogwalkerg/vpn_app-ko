@@ -12,6 +12,11 @@ on:
         type: boolean
         required: false
         default: false
+      signed_ios:
+        description: "Build and publish the formally signed iOS IPA"
+        type: boolean
+        required: false
+        default: false
 
 permissions:
   contents: write
@@ -21,6 +26,7 @@ env:
 
 jobs:
   analyze:
+    if: ${{ !inputs.signed_ios }}
     runs-on: ubuntu-latest
     steps:
     - uses: actions/checkout@v4
@@ -61,6 +67,7 @@ jobs:
         if-no-files-found: error
 
   build-ios:
+    if: ${{ !inputs.signed_ios }}
     runs-on: macos-latest
     needs: analyze
     steps:
@@ -96,6 +103,14 @@ jobs:
         name: ios-unsigned-compile-check
         path: app-ios-unsigned-compile-check.ipa
         if-no-files-found: error
+
+  build-ios-signed:
+    if: ${{ inputs.ios_only && inputs.signed_ios }}
+    uses: ./.github/workflows/build_ios_release.yml
+    with:
+      version: ${{ inputs.version }}
+      publish_release: true
+    secrets: inherit
 
   build-windows:
     if: ${{ !inputs.ios_only }}
