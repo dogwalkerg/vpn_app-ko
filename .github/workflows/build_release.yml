@@ -6,7 +6,12 @@ on:
       version:
         description: "Release version"
         required: false
-        default: "1.0.26"
+        default: "1.0.27"
+      ios_only:
+        description: "Only compile the iOS app and Packet Tunnel"
+        type: boolean
+        required: false
+        default: false
 
 permissions:
   contents: write
@@ -28,6 +33,7 @@ jobs:
     - run: flutter test
 
   build-android:
+    if: ${{ !inputs.ios_only }}
     runs-on: ubuntu-latest
     needs: analyze
     steps:
@@ -63,56 +69,36 @@ jobs:
       with:
         channel: stable
         flutter-version: 3.44.x
-    - run: flutter create --platforms=ios,macos .
-    - name: Set iOS deployment target
-      run: |
-        python3 - <<'PY'
-        from pathlib import Path
-        podfile = Path('ios/Podfile')
-        text = podfile.read_text()
-        sources = ["source 'https://github.com/CocoaPods/Specs.git'"]
-        for source in reversed(sources):
-            if source not in text:
-                text = source + '\n' + text
-        lines = text.splitlines()
-        out = []
-        done = False
-        for line in lines:
-            stripped = line.strip()
-            if stripped.startswith('platform :ios') or stripped.startswith('# platform :ios'):
-                if not done:
-                    out.append("platform :ios, '15.0'")
-                    done = True
-                continue
-            out.append(line)
-        if not done:
-            out.insert(0, "platform :ios, '15.0'")
-        podfile.write_text('\n'.join(out) + '\n')
-        pbx = Path('ios/Runner.xcodeproj/project.pbxproj')
-        text = pbx.read_text().replace('IPHONEOS_DEPLOYMENT_TARGET = 13.0;', 'IPHONEOS_DEPLOYMENT_TARGET = 15.0;')
-        text = text.replace('IPHONEOS_DEPLOYMENT_TARGET = 12.0;', 'IPHONEOS_DEPLOYMENT_TARGET = 15.0;')
-        pbx.write_text(text)
-        PY
-        grep -n "platform" ios/Podfile
-        grep -n "IPHONEOS_DEPLOYMENT_TARGET" ios/Runner.xcodeproj/project.pbxproj || true
     - run: flutter pub get
+    - name: Install pinned iOS Xray framework
+      run: bash tool/setup_ios_xray.sh
     - name: Install iOS pods
       working-directory: ios
       run: pod install --repo-update
     - run: flutter build ios --release --no-codesign --build-name=${{ inputs.version }} --build-number=${{ github.run_number }} --dart-define=BASE_URL=${{ env.BASE_URL }}
-    - name: Package IPA (unsigned)
+    - name: Verify Packet Tunnel structure
       run: |
-        rm -rf Payload app-release-unsigned.ipa
-        mkdir -p Payload
-        cp -r build/ios/iphoneos/Runner.app Payload/
-        zip -r app-release-unsigned.ipa Payload/
+        set -euo pipefail
+        app="build/ios/iphoneos/Runner.app"
+        tunnel="${app}/PlugIns/XrayTunnel.appex"
+        test -d "${tunnel}"
+        test "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "${app}/Info.plist")" = "app.ocelot3040.maroon4586"
+        test "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "${tunnel}/Info.plist")" = "app.ocelot3040.maroon4586.XrayTunnel"
+        test -f "${tunnel}/XrayTunnel"
+    - name: Package IPA compile check (unsigned)
+      run: |
+        rm -rf Payload app-ios-unsigned-compile-check.ipa
+        mkdir Payload
+        ditto build/ios/iphoneos/Runner.app Payload/Runner.app
+        ditto -c -k --sequesterRsrc --keepParent Payload app-ios-unsigned-compile-check.ipa
     - uses: actions/upload-artifact@v4
       with:
-        name: app-release-ipa
-        path: app-release-unsigned.ipa
+        name: ios-unsigned-compile-check
+        path: app-ios-unsigned-compile-check.ipa
         if-no-files-found: error
 
   build-windows:
+    if: ${{ !inputs.ios_only }}
     runs-on: windows-latest
     needs: analyze
     steps:
@@ -137,6 +123,7 @@ jobs:
         if-no-files-found: error
 
   build-macos:
+    if: ${{ !inputs.ios_only }}
     runs-on: macos-latest
     needs: analyze
     steps:
@@ -186,7 +173,12 @@ jobs:
   release:
     needs: [build-android, build-ios, build-windows, build-macos]
     runs-on: ubuntu-latest
-    if: github.event_name == 'workflow_dispatch'
+    if: >-
+      ${{ always() && !inputs.ios_only &&
+          needs.build-android.result == 'success' &&
+          needs.build-ios.result == 'success' &&
+          needs.build-windows.result == 'success' &&
+          needs.build-macos.result == 'success' }}
     steps:
     - uses: actions/download-artifact@v4
       with:
