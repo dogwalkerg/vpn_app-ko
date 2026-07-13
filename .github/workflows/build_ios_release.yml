@@ -135,6 +135,14 @@ jobs:
               echo "::error::${prefix} profile targets ${app_identifier}, expected ${IOS_TEAM_ID}.${expected_id}"
               exit 1
             fi
+            if ! /usr/libexec/PlistBuddy -c 'Print :Entitlements:com.apple.developer.networking.networkextension' "${plist}" | grep -Fq packet-tunnel-provider; then
+              echo "::error::${prefix} profile does not allow packet-tunnel-provider"
+              exit 1
+            fi
+            if ! /usr/libexec/PlistBuddy -c 'Print :Entitlements:com.apple.security.application-groups' "${plist}" | grep -Fq group.a3ccc1476ba7bbb2.1; then
+              echo "::error::${prefix} profile does not allow group.a3ccc1476ba7bbb2.1"
+              exit 1
+            fi
             cp "${raw}" "${profile_dir}/${uuid}.mobileprovision"
             printf '%s' "${name}"
           }
@@ -196,6 +204,8 @@ jobs:
           codesign -d --entitlements :- "${tunnel}" > "${RUNNER_TEMP}/tunnel-entitlements.plist"
           /usr/libexec/PlistBuddy -c 'Print :com.apple.developer.networking.networkextension:0' "${RUNNER_TEMP}/app-entitlements.plist" | grep -Fx packet-tunnel-provider
           /usr/libexec/PlistBuddy -c 'Print :com.apple.developer.networking.networkextension:0' "${RUNNER_TEMP}/tunnel-entitlements.plist" | grep -Fx packet-tunnel-provider
+          /usr/libexec/PlistBuddy -c 'Print :com.apple.security.application-groups:0' "${RUNNER_TEMP}/app-entitlements.plist" | grep -Fx group.a3ccc1476ba7bbb2.1
+          /usr/libexec/PlistBuddy -c 'Print :com.apple.security.application-groups:0' "${RUNNER_TEMP}/tunnel-entitlements.plist" | grep -Fx group.a3ccc1476ba7bbb2.1
           cp "${ipa}" "app-ios-${{ inputs.version }}-signed.ipa"
 
       - uses: actions/upload-artifact@v4

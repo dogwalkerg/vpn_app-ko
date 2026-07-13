@@ -29,7 +29,7 @@ jobs:
         channel: stable
         flutter-version: 3.44.x
     - run: flutter pub get
-    - run: flutter analyze || true
+    - run: flutter analyze
     - run: flutter test
 
   build-android:

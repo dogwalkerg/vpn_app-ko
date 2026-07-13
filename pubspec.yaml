@@ -55,6 +55,8 @@ flutter_launcher_icons:
     icon_size: 256
 
 flutter:
+  config:
+    enable-swift-package-manager: false
   uses-material-design: true
   assets:
     - assets/tray/tray_icon_connect.ico

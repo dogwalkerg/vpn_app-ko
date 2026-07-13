@@ -370,6 +370,7 @@ class VpnRepositoryImpl implements VpnRepository {
         StateError('iOS Packet Tunnel failed to start'),
       );
     }
+    if (state == 'DISCONNECTED') _iosVlessSawConnecting = false;
     final stage = switch (state) {
       'CONNECTED' => VpnStage.connected,
       'CONNECTING' => VpnStage.connecting,
@@ -411,13 +412,11 @@ class VpnRepositoryImpl implements VpnRepository {
     try {
       await _iosVlessReady!.future.timeout(const Duration(seconds: 30));
     } on TimeoutException {
-      await engine.stopVless();
-      _iosVlessConnected = false;
+      await _stopIosVlessAndWait();
       throw Exception('iOS 代理内核启动超时，请刷新订阅或更换节点');
     }
     if (!await _verifyIosTunnel()) {
-      await engine.stopVless();
-      _iosVlessConnected = false;
+      await _stopIosVlessAndWait();
       throw Exception('节点已连接但无法访问互联网，请刷新订阅或更换节点');
     }
   }
@@ -432,10 +431,11 @@ class VpnRepositoryImpl implements VpnRepository {
       } catch (error) {
         lastError = error;
         try {
-          await _iosVless?.stopVless();
-        } catch (_) {}
-        _iosVlessConnected = false;
-        await Future.delayed(const Duration(milliseconds: 700));
+          await _stopIosVlessAndWait();
+        } catch (stopError) {
+          throw StateError('iOS Packet Tunnel 无法完全停止：$stopError');
+        }
+        await Future.delayed(const Duration(milliseconds: 300));
       }
     }
     throw lastError ?? Exception('订阅中没有可用的 iOS 节点');
@@ -449,22 +449,21 @@ class VpnRepositoryImpl implements VpnRepository {
       _iosVlessConnected = false;
       return;
     }
-    final wasConnected = _iosVlessConnected;
+    final shouldWait = _iosVlessConnected || _iosVlessSawConnecting;
     final stopped = Completer<void>();
     _iosVlessStopped = stopped;
+    var confirmed = !shouldWait;
     try {
-      await engine.stopVless();
-      if (wasConnected) await stopped.future.timeout(timeout);
-    } on TimeoutException {
-      _vpn.report(
-        VpnStatusEvent(
-          stage: VpnStage.disconnected,
-          sessionId: _iosVlessTrafficSessionId,
-        ),
-      );
+      await engine.stopVless().timeout(timeout + const Duration(seconds: 4));
+      if (shouldWait && !stopped.isCompleted) {
+        await stopped.future.timeout(timeout);
+      }
+      confirmed = true;
     } finally {
-      _iosVlessConnected = false;
-      _iosVlessSawConnecting = false;
+      if (confirmed) {
+        _iosVlessConnected = false;
+        _iosVlessSawConnecting = false;
+      }
       if (identical(_iosVlessStopped, stopped)) _iosVlessStopped = null;
     }
   }

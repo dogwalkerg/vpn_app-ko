@@ -269,6 +269,8 @@ public class FlutterVlessPlugin: NSObject, FlutterPlugin, FlutterStreamHandler {
     private var downloadSpeed: Int = 0
     private var lastTrafficLogDate: Date = .distantPast
     private var lastProviderDebugLogDate: Date = .distantPast
+    private var pendingStopResults: [FlutterResult] = []
+    private var stopTimeoutWorkItem: DispatchWorkItem?
 
     public static func register(with registrar: FlutterPluginRegistrar) {
         let channel = FlutterMethodChannel(name: "flutter_vless", binaryMessenger: registrar.messenger())
@@ -467,12 +469,58 @@ public class FlutterVlessPlugin: NSObject, FlutterPlugin, FlutterStreamHandler {
         }
     }
 
-    private func stopVless(result: FlutterResult) {
+    private func stopVless(result: @escaping FlutterResult) {
         pluginLog.info("stopVless requested")
-        proxyOnlyRunner.stop()
-        packetTunnelManager?.stop()
-        stopTimer(reason: "stopVless")
-        result(nil)
+        if proxyOnlyRunner.isRunning {
+            proxyOnlyRunner.stop()
+            stopTimer(reason: "stopVless-proxy")
+            result(nil)
+            return
+        }
+
+        guard let manager = packetTunnelManager else {
+            stopTimer(reason: "stopVless-no-manager")
+            result(nil)
+            return
+        }
+        switch manager.status {
+        case .none, .invalid, .disconnected:
+            stopTimer(reason: "stopVless-already-stopped")
+            result(nil)
+        default:
+            pendingStopResults.append(result)
+            scheduleStopTimeout()
+            startTimer(reason: "stopVless-disconnecting")
+            emitStatus(duration: currentDurationSeconds(), state: "DISCONNECTING", reason: "stopVless")
+            manager.stop()
+        }
+    }
+
+    private func scheduleStopTimeout() {
+        guard stopTimeoutWorkItem == nil, !pendingStopResults.isEmpty else { return }
+        let item = DispatchWorkItem { [weak self] in
+            guard let self, !self.pendingStopResults.isEmpty else { return }
+            pluginLog.error("Timed out waiting for the system Packet Tunnel to disconnect")
+            self.finishPendingStops(
+                error: FlutterError(
+                    code: "VPN_STOP_TIMEOUT",
+                    message: "Timed out waiting for the iOS Packet Tunnel to disconnect.",
+                    details: nil
+                )
+            )
+        }
+        stopTimeoutWorkItem = item
+        DispatchQueue.main.asyncAfter(deadline: .now() + 10, execute: item)
+    }
+
+    private func finishPendingStops(error: FlutterError? = nil) {
+        stopTimeoutWorkItem?.cancel()
+        stopTimeoutWorkItem = nil
+        let results = pendingStopResults
+        pendingStopResults.removeAll()
+        for result in results {
+            result(error)
+        }
     }
 
     private func getConnectedServerDelay(call: FlutterMethodCall, result: @escaping FlutterResult){
@@ -614,6 +662,7 @@ public class FlutterVlessPlugin: NSObject, FlutterPlugin, FlutterStreamHandler {
             case .disconnected, .invalid:
                 if !self.proxyOnlyRunner.isRunning {
                     self.stopTimer(reason: "vpn-status-\(status?.rawValue ?? -1)")
+                    self.finishPendingStops()
                 }
             default:
                 break

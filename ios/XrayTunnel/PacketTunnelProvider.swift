@@ -53,10 +53,13 @@ private func rememberTunnelLog(_ message: String) {
 class PacketTunnelProvider: NEPacketTunnelProvider {
 
     private let logger = CustomXRayLogger()
+    private let lifecycleLock = NSLock()
+    private var tunnelStopping = false
     private var lastTrafficLogDate: Date = .distantPast
     private var hevLogURL: URL?
 
     override func startTunnel(options: [String : NSObject]? = nil) async throws {
+        setTunnelStopping(false)
         rememberTunnelLog("Starting Xray packet tunnel")
         tunnelLog.info("Starting Xray packet tunnel options=\(String(describing: options), privacy: .public)")
         guard
@@ -121,6 +124,7 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
 
     }
     override func stopTunnel(with reason: NEProviderStopReason, completionHandler: @escaping () -> Void) {
+        setTunnelStopping(true)
         tunnelLog.info("Stopping Xray packet tunnel, reason: \(reason.rawValue, privacy: .public)")
         logTrafficStats(context: "stop")
         stopXRay()
@@ -209,6 +213,12 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
             rememberTunnelLog("HEV socks5 tunnel exited with code \(exitCode)")
             tunnelLog.error("HEV socks5 tunnel exited with code \(exitCode, privacy: .public)")
             NSLog("HEV_SOCKS5_TUNNEL_MAIN: \(exitCode)")
+            DispatchQueue.main.async { [weak self] in
+                guard let self, !self.isTunnelStopping() else { return }
+                self.cancelTunnelWithError(
+                    self.tunnelError("Tun2Socks exited unexpectedly with code \(exitCode)")
+                )
+            }
         }
     }
 
@@ -710,6 +720,18 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
         return NSError(domain: "flutter_vless.packet_tunnel", code: 1, userInfo: [
             NSLocalizedDescriptionKey: message
         ])
+    }
+
+    private func setTunnelStopping(_ value: Bool) {
+        lifecycleLock.lock()
+        tunnelStopping = value
+        lifecycleLock.unlock()
+    }
+
+    private func isTunnelStopping() -> Bool {
+        lifecycleLock.lock()
+        defer { lifecycleLock.unlock() }
+        return tunnelStopping
     }
 
     private func logTrafficStats(context: String) {
