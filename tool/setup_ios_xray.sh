@@ -7,7 +7,8 @@ readonly checksum="c4611c9ce9d9fc44956bc96f1886396507da34fd3892b94ebe96982721575
 readonly url="https://github.com/XIIIFOX/flutter_vless/releases/download/${release_tag}/XRay.xcframework.zip"
 readonly root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 readonly ios_dir="${root}/third_party/flutter_vless_ios/ios"
-readonly framework="${ios_dir}/XRay.xcframework"
+readonly package_dir="${ios_dir}/flutter_vless"
+readonly framework="${package_dir}/XRay.xcframework"
 
 if [[ -f "${framework}/ios-arm64/XRay.framework/XRay" ]]; then
   echo "XRay ${version} is already available."
@@ -26,6 +27,6 @@ if [[ "${actual}" != "${checksum}" ]]; then
 fi
 
 rm -rf "${framework}"
-unzip -q "${archive}" -d "${ios_dir}"
+unzip -q "${archive}" -d "${package_dir}"
 test -f "${framework}/ios-arm64/XRay.framework/XRay"
 echo "Installed XRay ${version}."

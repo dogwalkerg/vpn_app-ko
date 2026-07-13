@@ -27,7 +27,7 @@ Flutter plugin to run VLESS/VMESS as a local proxy and VPN on iOS with XRay core
 
   s.prepare_command = <<-CMD
     set -e
-    if [ ! -d XRay.xcframework ]; then
+    if [ ! -d flutter_vless/XRay.xcframework ]; then
       echo "Downloading flutter_vless XRay #{xray_version} binary..."
       curl -L "#{xray_url}" -o XRay.xcframework.zip
       actual_checksum="$(swift package compute-checksum XRay.xcframework.zip)"
@@ -37,13 +37,13 @@ Flutter plugin to run VLESS/VMESS as a local proxy and VPN on iOS with XRay core
         echo "Actual:   $actual_checksum"
         exit 1
       fi
-      unzip -q XRay.xcframework.zip
+      unzip -q XRay.xcframework.zip -d flutter_vless
       rm XRay.xcframework.zip
     fi
   CMD
 
-  s.preserve_paths = 'XRay.xcframework/**/*'
+  s.preserve_paths = 'flutter_vless/XRay.xcframework/**/*'
   s.libraries = 'resolv'
-  s.vendored_frameworks = 'XRay.xcframework'
+  s.vendored_frameworks = 'flutter_vless/XRay.xcframework'
   s.swift_version = '5.0'
 end

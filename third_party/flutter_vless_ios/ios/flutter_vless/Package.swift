@@ -3,7 +3,7 @@
 import PackageDescription
 let xrayReleaseTag = "xray-ios-v26.6.27"
 let xrayChecksum = "c4611c9ce9d9fc44956bc96f1886396507da34fd3892b94ebe96982721575774"
-let xrayRepoLocalPath = "../XRay.xcframework"
+let xrayLocalPath = "XRay.xcframework"
 
 let package = Package(
     name: "flutter_vless",
@@ -28,7 +28,7 @@ let package = Package(
                 .linkedLibrary("resolv")
             ]
         ),
-        .binaryTarget(name: "XRay", path: xrayRepoLocalPath),
+        .binaryTarget(name: "XRay", path: xrayLocalPath),
         .testTarget(
             name: "flutter_vless_tunnel_supportTests",
             dependencies: ["flutter_vless_tunnel_support"]
