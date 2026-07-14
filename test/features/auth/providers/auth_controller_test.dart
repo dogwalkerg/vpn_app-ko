@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:dio/dio.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
+import 'package:flutter_secure_storage_platform_interface/flutter_secure_storage_platform_interface.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -83,6 +84,41 @@ void main() {
           .read(authControllerProvider.notifier)
           .login('tester', 'password');
       await Future<void>.delayed(Duration.zero);
+
+      expect(await AppSecureStorage.readToken(), 'login-token');
+      expect(container.read(tokenProvider), 'login-token');
+      expect(
+        container.read(authSessionPhaseProvider),
+        AuthSessionPhase.signedIn,
+      );
+      expect(container.read(authControllerProvider), isA<FeatureReady<User>>());
+    },
+  );
+
+  test(
+    'hanging platform secure storage does not block a successful login',
+    () async {
+      final original = FlutterSecureStoragePlatform.instance;
+      addTearDown(() => FlutterSecureStoragePlatform.instance = original);
+      FlutterSecureStoragePlatform.instance = _HangingWriteSecureStorage();
+      SharedPreferences.setMockInitialValues({
+        'auth_token_store_initialized_v1': true,
+      });
+      final authRepository = _StubAuthRepository(user: user);
+      final container = _container(authRepository, disconnect: () async {});
+      addTearDown(container.dispose);
+
+      container.read(authControllerProvider);
+      await _waitUntil(
+        () =>
+            container.read(authSessionPhaseProvider) ==
+            AuthSessionPhase.signedOut,
+      );
+
+      await container
+          .read(authControllerProvider.notifier)
+          .login('tester', 'password')
+          .timeout(const Duration(milliseconds: 500));
 
       expect(await AppSecureStorage.readToken(), 'login-token');
       expect(container.read(tokenProvider), 'login-token');
@@ -437,4 +473,41 @@ class _StubSubscriptionRepository implements SubscriptionRepository {
 
   @override
   Future<void> clearCache() async {}
+}
+
+class _HangingWriteSecureStorage extends FlutterSecureStoragePlatform {
+  final Completer<void> _never = Completer<void>();
+
+  @override
+  Future<bool> containsKey({
+    required String key,
+    required Map<String, String> options,
+  }) async => false;
+
+  @override
+  Future<void> delete({
+    required String key,
+    required Map<String, String> options,
+  }) async {}
+
+  @override
+  Future<void> deleteAll({required Map<String, String> options}) async {}
+
+  @override
+  Future<String?> read({
+    required String key,
+    required Map<String, String> options,
+  }) async => null;
+
+  @override
+  Future<Map<String, String>> readAll({
+    required Map<String, String> options,
+  }) async => const {};
+
+  @override
+  Future<void> write({
+    required String key,
+    required String value,
+    required Map<String, String> options,
+  }) => _never.future;
 }

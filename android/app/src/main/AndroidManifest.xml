@@ -10,6 +10,8 @@
     <application
         android:label="自由云"
         android:name="${applicationName}"
+        android:allowBackup="false"
+        android:fullBackupContent="false"
         android:extractNativeLibs="true"
         android:icon="@mipmap/ic_launcher2">
         <activity

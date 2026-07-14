@@ -1,5 +1,6 @@
 // lib/features/auth/providers/auth_controller.dart
 import 'dart:async';
+import 'dart:developer' as developer;
 import 'package:dio/dio.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:vpn_app/core/cache/memory_cache.dart';
@@ -150,6 +151,7 @@ class AuthController extends StateNotifier<AuthState> {
     try {
       final res = await _login(username, password, cancelToken: ct);
       if (generation != _authGeneration || ct.isCancelled) return;
+      developer.log('login_response_accepted', name: 'vpn_app.auth');
       await AppSecureStorage.saveToken(res.token);
       if (generation != _authGeneration || ct.isCancelled) {
         await AppSecureStorage.clearTokenIfMatches(res.token);
@@ -162,10 +164,17 @@ class AuthController extends StateNotifier<AuthState> {
       state = FeatureReady<User>(res.user);
       ref.read(authSessionPhaseProvider.notifier).state =
           AuthSessionPhase.signedIn;
+      developer.log('login_session_committed', name: 'vpn_app.auth');
       unawaited(_refreshAfterLogin(generation, res.token));
     } on ApiException catch (e) {
       if (!ct.isCancelled) state = FeatureError<User>(e.message);
-    } catch (_) {
+    } catch (error, stackTrace) {
+      developer.log(
+        'login_session_commit_failed',
+        name: 'vpn_app.auth',
+        error: error,
+        stackTrace: stackTrace,
+      );
       if (!ct.isCancelled) {
         state = const FeatureError<User>('无法保存登录状态，请重试');
       }

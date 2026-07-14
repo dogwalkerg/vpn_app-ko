@@ -20,24 +20,26 @@ final rootNavigatorKey = GlobalKey<NavigatorState>();
 
 class RouterNotifier extends ChangeNotifier {
   final Ref ref;
+  late AuthSessionPhase _phase;
+
   RouterNotifier(this.ref) {
+    _phase = ref.read(authSessionPhaseProvider);
+    ref.listen<AuthSessionPhase>(authSessionPhaseProvider, (previous, next) {
+      _phase = next;
+      notifyListeners();
+    });
     // Creating the controller starts secure-storage session restoration.
     ref.read(authControllerProvider);
-    ref.listen<AuthSessionPhase>(
-      authSessionPhaseProvider,
-      (previous, next) => notifyListeners(),
-    );
   }
 
-  bool get isRestoring =>
-      ref.read(authSessionPhaseProvider) == AuthSessionPhase.restoring;
-  bool get isLoggedIn => ref.read(isAuthenticatedProvider);
+  bool get isRestoring => _phase == AuthSessionPhase.restoring;
+  bool get isLoggedIn => _phase == AuthSessionPhase.signedIn;
 }
 
 final routerProvider = Provider<GoRouter>((ref) {
   final notifier = RouterNotifier(ref);
 
-  return GoRouter(
+  final router = GoRouter(
     navigatorKey: rootNavigatorKey,
     initialLocation: AppRoute.gate.path,
     refreshListenable: notifier,
@@ -108,4 +110,9 @@ final routerProvider = Provider<GoRouter>((ref) {
       );
     },
   );
+  ref.onDispose(() {
+    router.dispose();
+    notifier.dispose();
+  });
+  return router;
 }, name: 'appRouter');
