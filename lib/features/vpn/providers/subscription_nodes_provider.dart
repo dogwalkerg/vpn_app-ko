@@ -5,6 +5,7 @@ import 'package:dio/dio.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:vpn_app/core/api/coco_api.dart';
 import 'package:vpn_app/core/config/app_config.dart';
+import 'package:vpn_app/core/storage/shared_preferences_provider.dart';
 import 'package:vpn_app/features/subscription/models/subscription_state.dart';
 import 'package:vpn_app/features/subscription/providers/subscription_providers.dart';
 import 'package:vpn_app/features/vpn/models/subscription_node.dart';
@@ -13,7 +14,151 @@ final selectedSubscriptionNodeProvider = StateProvider<SubscriptionNode?>(
   (ref) => null,
 );
 
-final subscriptionNodesRefreshingProvider = StateProvider<bool>((ref) => false);
+enum NodeSelectionMode { manual, smart }
+
+const nodeSelectionModePreferenceKey = 'vpn.node_selection_mode.v1';
+
+typedef NodeSelectionModePersistence =
+    Future<void> Function(NodeSelectionMode mode);
+
+final nodeSelectionModePersistenceProvider =
+    Provider<NodeSelectionModePersistence>((ref) {
+      return (mode) async {
+        final preferences = ref.read(sharedPreferencesProvider);
+        if (preferences == null) return;
+        try {
+          await preferences.setString(
+            nodeSelectionModePreferenceKey,
+            mode.name,
+          );
+        } catch (_) {}
+      };
+    }, name: 'nodeSelectionModePersistence');
+
+final nodeSelectionModeProvider =
+    StateNotifierProvider<NodeSelectionController, NodeSelectionMode>(
+      NodeSelectionController.new,
+      name: 'nodeSelectionMode',
+    );
+
+class NodeSelectionController extends StateNotifier<NodeSelectionMode> {
+  NodeSelectionController(this.ref) : super(_initialSelectionMode(ref));
+
+  final Ref ref;
+  int _selectionGeneration = 0;
+
+  Future<SubscriptionNode?> selectSmart({List<SubscriptionNode>? nodes}) async {
+    final generation = ++_selectionGeneration;
+    final suppliedRevision = ref.read(subscriptionNodesRevisionProvider);
+    state = NodeSelectionMode.smart;
+    await ref.read(nodeSelectionModePersistenceProvider)(
+      NodeSelectionMode.smart,
+    );
+    if (generation != _selectionGeneration ||
+        state != NodeSelectionMode.smart) {
+      return null;
+    }
+    final currentRevision = ref.read(subscriptionNodesRevisionProvider);
+    return _selectBestNode(
+      suppliedRevision == currentRevision ? nodes : null,
+      generation: generation,
+    );
+  }
+
+  Future<SubscriptionNode?> refreshSmartSelection() async {
+    if (state != NodeSelectionMode.smart) {
+      return ref.read(selectedSubscriptionNodeProvider);
+    }
+    final generation = ++_selectionGeneration;
+    return _selectBestNode(null, generation: generation);
+  }
+
+  Future<void> selectManual(SubscriptionNode node) async {
+    _selectionGeneration++;
+    state = NodeSelectionMode.manual;
+    ref.read(selectedSubscriptionNodeProvider.notifier).state = node;
+    await ref.read(nodeSelectionModePersistenceProvider)(
+      NodeSelectionMode.manual,
+    );
+  }
+
+  void cancelPendingSelection({bool clearNode = false}) {
+    _selectionGeneration++;
+    if (clearNode) {
+      ref.read(selectedSubscriptionNodeProvider.notifier).state = null;
+    }
+  }
+
+  Future<SubscriptionNode?> _selectBestNode(
+    List<SubscriptionNode>? suppliedNodes, {
+    required int generation,
+  }) async {
+    var candidates = suppliedNodes;
+    while (generation == _selectionGeneration &&
+        state == NodeSelectionMode.smart) {
+      final activeRefresh = ref
+          .read(subscriptionNodesRefreshControllerProvider.notifier)
+          .activeRefresh;
+      if (activeRefresh != null) {
+        try {
+          await activeRefresh;
+        } catch (_) {}
+        candidates = null;
+        if (generation != _selectionGeneration ||
+            state != NodeSelectionMode.smart) {
+          return null;
+        }
+      }
+
+      final revision = ref.read(subscriptionNodesRevisionProvider);
+      final nodes = List<SubscriptionNode>.of(
+        candidates ??
+            ref.read(subscriptionNodesProvider).valueOrNull ??
+            const <SubscriptionNode>[],
+      ).where(isNodeCompatibleWithSmartSelection).toList();
+      final previous = ref.read(selectedSubscriptionNodeProvider);
+      final selected = await selectLowestLatencyNode(
+        nodes: nodes,
+        probe: ref.read(nodeLatencyProbeProvider),
+        fallback: previous,
+      );
+
+      if (generation != _selectionGeneration ||
+          state != NodeSelectionMode.smart) {
+        return null;
+      }
+      if (revision != ref.read(subscriptionNodesRevisionProvider)) {
+        candidates = null;
+        continue;
+      }
+      if (selected != null) {
+        ref.read(selectedSubscriptionNodeProvider.notifier).state = selected;
+      }
+      return selected;
+    }
+    return null;
+  }
+}
+
+NodeSelectionMode _initialSelectionMode(Ref ref) {
+  final stored = ref
+      .read(sharedPreferencesProvider)
+      ?.getString(nodeSelectionModePreferenceKey);
+  return stored == NodeSelectionMode.smart.name
+      ? NodeSelectionMode.smart
+      : NodeSelectionMode.manual;
+}
+
+final subscriptionNodesRevisionProvider = StateProvider<int>((ref) => 0);
+final subscriptionNodesRefreshControllerProvider =
+    StateNotifierProvider<SubscriptionNodesRefreshController, bool>(
+      SubscriptionNodesRefreshController.new,
+      name: 'subscriptionNodesRefreshController',
+    );
+final subscriptionNodesRefreshingProvider = Provider<bool>(
+  (ref) => ref.watch(subscriptionNodesRefreshControllerProvider),
+  name: 'subscriptionNodesRefreshing',
+);
 
 typedef NodeLatencyProbe = Future<int?> Function(SubscriptionNode node);
 
@@ -21,6 +166,61 @@ final nodeLatencyProbeProvider = Provider<NodeLatencyProbe>(
   (_) => measureNodeLatency,
   name: 'nodeLatencyProbe',
 );
+
+bool isNodeCompatibleWithSmartSelection(
+  SubscriptionNode node, {
+  bool? desktopMihomo,
+}) {
+  final usesDesktopMihomo =
+      desktopMihomo ?? (Platform.isWindows || Platform.isMacOS);
+  return !usesDesktopMihomo || node.raw.toLowerCase().startsWith('vless://');
+}
+
+Future<SubscriptionNode?> selectLowestLatencyNode({
+  required List<SubscriptionNode> nodes,
+  required NodeLatencyProbe probe,
+  SubscriptionNode? fallback,
+}) async {
+  if (nodes.isEmpty) return null;
+
+  final measurements = await Future.wait(
+    nodes.map((node) async {
+      try {
+        return (node: node, latency: await probe(node));
+      } catch (_) {
+        return (node: node, latency: null);
+      }
+    }),
+  );
+
+  SubscriptionNode? bestNode;
+  int? bestLatency;
+  for (final measurement in measurements) {
+    final latency = measurement.latency;
+    if (latency == null || latency <= 0) continue;
+
+    final node = measurement.node;
+    final isFaster = bestLatency == null || latency < bestLatency;
+    final winsTie =
+        latency == bestLatency &&
+        bestNode != null &&
+        (node.speedMbps > bestNode.speedMbps ||
+            (node.speedMbps == bestNode.speedMbps &&
+                node.load < bestNode.load));
+    if (isFaster || winsTie) {
+      bestNode = node;
+      bestLatency = latency;
+    }
+  }
+  if (bestNode != null) return bestNode;
+
+  if (fallback != null) {
+    for (final node in nodes) {
+      if (node.raw == fallback.raw) return node;
+    }
+  }
+  return nodes.first;
+}
 
 final subscriptionNodesProvider = FutureProvider<List<SubscriptionNode>>((
   ref,
@@ -51,9 +251,15 @@ final subscriptionNodesProvider = FutureProvider<List<SubscriptionNode>>((
                 .data ??
             '';
   final nodes = parseSubscriptionNodes(text);
+  ref.read(subscriptionNodesRevisionProvider.notifier).state++;
   final selected = ref.read(selectedSubscriptionNodeProvider);
-  if (nodes.isNotEmpty &&
-      (selected == null || !nodes.any((node) => node.raw == selected.raw))) {
+  final smartSelection =
+      ref.read(nodeSelectionModeProvider) == NodeSelectionMode.smart;
+  if (nodes.isNotEmpty && selected == null) {
+    ref.read(selectedSubscriptionNodeProvider.notifier).state = nodes.first;
+  } else if (nodes.isNotEmpty &&
+      !smartSelection &&
+      !nodes.any((node) => node.raw == selected?.raw)) {
     ref.read(selectedSubscriptionNodeProvider.notifier).state = nodes.first;
   } else if (nodes.isEmpty) {
     ref.read(selectedSubscriptionNodeProvider.notifier).state = null;
@@ -72,18 +278,40 @@ bool _isBackendSubscriptionUrl(String value) {
       subscriptionUri.path.endsWith('/v1/link');
 }
 
-Future<void> refreshSubscriptionNodes(WidgetRef ref) async {
-  if (ref.read(subscriptionNodesRefreshingProvider)) return;
+Future<void> refreshSubscriptionNodes(WidgetRef ref) =>
+    ref.read(subscriptionNodesRefreshControllerProvider.notifier).refresh();
 
-  ref.read(subscriptionNodesRefreshingProvider.notifier).state = true;
-  try {
+class SubscriptionNodesRefreshController extends StateNotifier<bool> {
+  SubscriptionNodesRefreshController(this.ref) : super(false);
+
+  final Ref ref;
+  Future<void>? _activeRefresh;
+
+  Future<void>? get activeRefresh => _activeRefresh;
+
+  Future<void> refresh() {
+    final active = _activeRefresh;
+    if (active != null) return active;
+
+    state = true;
+    ref.read(subscriptionNodesRevisionProvider.notifier).state++;
+    late final Future<void> future;
+    future = _performRefresh().whenComplete(() {
+      if (identical(_activeRefresh, future)) {
+        _activeRefresh = null;
+        if (mounted) state = false;
+      }
+    });
+    _activeRefresh = future;
+    return future;
+  }
+
+  Future<void> _performRefresh() async {
     await ref
         .read(subscriptionControllerProvider.notifier)
         .fetch(forceRefresh: true);
     ref.invalidate(subscriptionNodesProvider);
     await ref.read(subscriptionNodesProvider.future);
-  } finally {
-    ref.read(subscriptionNodesRefreshingProvider.notifier).state = false;
   }
 }
 

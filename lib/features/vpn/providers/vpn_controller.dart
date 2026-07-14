@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:vpn_app/core/errors/ui_error.dart';
 import 'package:vpn_app/features/subscription/providers/subscription_providers.dart';
 import 'package:vpn_app/features/vpn/platform/vpn_channel.dart';
+import 'package:vpn_app/features/vpn/providers/subscription_nodes_provider.dart';
 import 'package:wireguard_flutter/wireguard_flutter.dart';
 import '../usecases/connect_vpn_usecase.dart';
 import '../usecases/disconnect_vpn_usecase.dart';
@@ -151,6 +152,17 @@ class VpnController extends StateNotifier<VpnState> {
         state = const VpnError('连接超时，请检查节点或网络');
       }
     });
+    if (ref.read(nodeSelectionModeProvider) == NodeSelectionMode.smart) {
+      final selected = await ref
+          .read(nodeSelectionModeProvider.notifier)
+          .refreshSmartSelection();
+      if (!mounted || generation != _operationGeneration) return;
+      if (selected == null) {
+        _connectTimeout?.cancel();
+        state = const VpnError('没有可用节点，请刷新订阅后重试');
+        return;
+      }
+    }
     final future = Future<void>.sync(connect);
     _connectFuture = future;
     try {

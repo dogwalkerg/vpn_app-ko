@@ -52,6 +52,7 @@ class _VpnScreenState extends ConsumerState<VpnScreen> {
   Future<void> _refreshNodes({bool showFeedback = true}) async {
     try {
       await refreshSubscriptionNodes(ref);
+      await _refreshSmartSelectionWhenIdle(ref);
       if (!mounted || !showFeedback) return;
       final nodes = ref.read(subscriptionNodesProvider).valueOrNull ?? const [];
       showAppSnackbar(
@@ -577,6 +578,8 @@ class _NodePicker extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final selected = ref.watch(selectedSubscriptionNodeProvider);
+    final selectionMode = ref.watch(nodeSelectionModeProvider);
+    final smartSelection = selectionMode == NodeSelectionMode.smart;
     final nodesState = ref.watch(subscriptionNodesProvider);
     final refreshing = ref.watch(subscriptionNodesRefreshingProvider);
     final nodes = nodesState.valueOrNull ?? const <SubscriptionNode>[];
@@ -635,7 +638,8 @@ class _NodePicker extends ConsumerWidget {
                   itemBuilder: (context, index) {
                     if (index == 0) {
                       return _SmartNodeTile(
-                        onTap: () => _select(context, ref, nodes.first),
+                        selected: smartSelection,
+                        onTap: () => _selectSmart(context, ref),
                       );
                     }
                     final node = nodes[index - 1];
@@ -643,7 +647,7 @@ class _NodePicker extends ConsumerWidget {
                       padding: const EdgeInsets.only(bottom: 11),
                       child: _NodeTile(
                         node: node,
-                        selected: selected?.raw == node.raw,
+                        selected: !smartSelection && selected?.raw == node.raw,
                         latencyProbe: ref.read(nodeLatencyProbeProvider),
                         onTap: () => _select(context, ref, node),
                       ),
@@ -658,6 +662,7 @@ class _NodePicker extends ConsumerWidget {
   Future<void> _refresh(BuildContext context, WidgetRef ref) async {
     try {
       await refreshSubscriptionNodes(ref);
+      await _refreshSmartSelectionWhenIdle(ref);
       if (!context.mounted) return;
       final nodes = ref.read(subscriptionNodesProvider).valueOrNull ?? const [];
       showAppSnackbar(
@@ -684,13 +689,35 @@ class _NodePicker extends ConsumerWidget {
     if (state is VpnConnected || state is VpnConnecting) {
       await ref.read(vpnControllerProvider.notifier).disconnectPressed();
     }
-    ref.read(selectedSubscriptionNodeProvider.notifier).state = node;
+    await ref.read(nodeSelectionModeProvider.notifier).selectManual(node);
+    if (context.mounted) onSelected();
+  }
+
+  Future<void> _selectSmart(BuildContext context, WidgetRef ref) async {
+    final state = ref.read(vpnControllerProvider);
+    if (state is VpnConnected || state is VpnConnecting) {
+      await ref.read(vpnControllerProvider.notifier).disconnectPressed();
+    }
+    await ref.read(nodeSelectionModeProvider.notifier).selectSmart();
     if (context.mounted) onSelected();
   }
 }
 
+Future<void> _refreshSmartSelectionWhenIdle(WidgetRef ref) async {
+  if (ref.read(nodeSelectionModeProvider) != NodeSelectionMode.smart) return;
+
+  final vpnState = ref.read(vpnControllerProvider);
+  if (vpnState is VpnConnected ||
+      vpnState is VpnConnecting ||
+      vpnState is VpnDisconnecting) {
+    return;
+  }
+  await ref.read(nodeSelectionModeProvider.notifier).refreshSmartSelection();
+}
+
 class _SmartNodeTile extends StatelessWidget {
-  const _SmartNodeTile({required this.onTap});
+  const _SmartNodeTile({required this.selected, required this.onTap});
+  final bool selected;
   final VoidCallback onTap;
   @override
   Widget build(BuildContext context) => Padding(
@@ -699,7 +726,7 @@ class _SmartNodeTile extends StatelessWidget {
       icon: Icons.auto_awesome_rounded,
       title: '智能选择',
       subtitle: _lineQualityLabel,
-      selected: false,
+      selected: selected,
       onTap: onTap,
     ),
   );

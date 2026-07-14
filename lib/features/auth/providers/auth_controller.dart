@@ -290,7 +290,9 @@ class AuthController extends StateNotifier<AuthState> {
 
     ref.invalidate(subscriptionControllerProvider);
     ref.invalidate(subscriptionNodesProvider);
-    ref.read(selectedSubscriptionNodeProvider.notifier).state = null;
+    ref
+        .read(nodeSelectionModeProvider.notifier)
+        .cancelPendingSelection(clearNode: true);
 
     state = const FeatureIdle();
   }

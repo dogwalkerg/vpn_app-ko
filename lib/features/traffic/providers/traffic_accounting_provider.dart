@@ -412,7 +412,9 @@ class TrafficAccountingController extends StateNotifier<TrafficAccountingState>
     final message = _restrictionMessage(report);
     try {
       await _ref.read(subscriptionControllerProvider.notifier).markBlocked();
-      _ref.read(selectedSubscriptionNodeProvider.notifier).state = null;
+      _ref
+          .read(nodeSelectionModeProvider.notifier)
+          .cancelPendingSelection(clearNode: true);
       _ref.invalidate(subscriptionNodesProvider);
       state = state.copyWith(
         restriction: report.restriction,

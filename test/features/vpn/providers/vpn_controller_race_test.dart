@@ -3,6 +3,8 @@ import 'dart:async';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:vpn_app/features/subscription/providers/subscription_providers.dart';
+import 'package:vpn_app/features/vpn/models/subscription_node.dart';
+import 'package:vpn_app/features/vpn/providers/subscription_nodes_provider.dart';
 import 'package:vpn_app/features/vpn/providers/vpn_controller.dart';
 import 'package:vpn_app/features/vpn/usecases/connect_vpn_usecase.dart';
 import 'package:vpn_app/features/vpn/usecases/disconnect_vpn_usecase.dart';
@@ -78,6 +80,43 @@ void main() {
     expect(controller.state, isA<VpnIdle>());
   });
 
+  test('smart mode refreshes the fastest node before connecting', () async {
+    final nodes = [_node('Node A', 443), _node('Node B', 8443)];
+    var latencies = <String, int>{nodes[0].raw: 80, nodes[1].raw: 20};
+    SubscriptionNode? nodeUsedByConnect;
+    late ProviderContainer container;
+    container = ProviderContainer(
+      overrides: [
+        vpnAccessProvider.overrideWithValue(true),
+        subscriptionNodesProvider.overrideWith((ref) async => nodes),
+        selectedSubscriptionNodeProvider.overrideWith((ref) => nodes.first),
+        nodeLatencyProbeProvider.overrideWithValue(
+          (node) async => latencies[node.raw],
+        ),
+        connectVpnUseCaseProvider.overrideWithValue(() async {
+          nodeUsedByConnect = container.read(selectedSubscriptionNodeProvider);
+        }),
+        disconnectVpnUseCaseProvider.overrideWithValue(() async {}),
+        isVpnConnectedUseCaseProvider.overrideWithValue(() async => false),
+      ],
+    );
+    addTearDown(container.dispose);
+    await container.read(subscriptionNodesProvider.future);
+    await container
+        .read(nodeSelectionModeProvider.notifier)
+        .selectSmart(nodes: nodes);
+    expect(container.read(selectedSubscriptionNodeProvider)?.raw, nodes[1].raw);
+
+    latencies = <String, int>{nodes[0].raw: 10, nodes[1].raw: 70};
+    final controller = container.read(vpnControllerProvider.notifier);
+    await _settleBootstrap();
+    await controller.connectPressed();
+
+    expect(nodeUsedByConnect?.raw, nodes[0].raw);
+    expect(controller.state, isA<VpnConnected>());
+    expect(container.read(nodeSelectionModeProvider), NodeSelectionMode.smart);
+  });
+
   test('repeated disconnect taps share one stop operation', () async {
     final releaseDisconnect = Completer<void>();
     var coreRunning = true;
@@ -109,6 +148,18 @@ void main() {
     expect(controller.state, isA<VpnIdle>());
   });
 }
+
+SubscriptionNode _node(String name, int port) => SubscriptionNode(
+  name: name,
+  type: 'VLESS',
+  host: '127.0.0.1',
+  port: port,
+  country: 'Test',
+  flag: '',
+  speedMbps: 0,
+  load: 0,
+  raw: 'vless://test@127.0.0.1:$port#$name',
+);
 
 ProviderContainer _container({
   required Future<void> Function() connect,
