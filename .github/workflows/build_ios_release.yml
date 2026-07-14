@@ -73,7 +73,6 @@ jobs:
         run: >-
           flutter build ios --release --no-codesign
           --build-name=${{ inputs.version }}
-          --build-number=${{ github.run_number }}
           --dart-define=BASE_URL=${{ env.BASE_URL }}
 
       - name: Verify unsigned Packet Tunnel structure
@@ -202,7 +201,6 @@ jobs:
         run: >-
           flutter build ipa --release
           --build-name=${{ inputs.version }}
-          --build-number=${{ github.run_number }}
           --dart-define=BASE_URL=${{ env.BASE_URL }}
           --export-options-plist=${RUNNER_TEMP}/ExportOptions.plist
 

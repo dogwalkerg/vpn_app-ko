@@ -59,7 +59,7 @@ jobs:
         fi
         mkdir -p android/keystore
         printf '%s' "$ANDROID_KEYSTORE_BASE64" | base64 --decode > android/keystore/my-release-key.jks
-    - run: flutter build apk --release --build-name=${{ inputs.version }} --build-number=${{ github.run_number }} --dart-define=BASE_URL=${{ env.BASE_URL }}
+    - run: flutter build apk --release --build-name=${{ inputs.version }} --dart-define=BASE_URL=${{ env.BASE_URL }}
     - name: Package Android
       run: cp build/app/outputs/flutter-apk/app-release.apk "Osca-Android-v${{ inputs.version }}.apk"
     - uses: actions/upload-artifact@v4
@@ -84,7 +84,7 @@ jobs:
     - name: Install iOS pods
       working-directory: ios
       run: pod install --repo-update
-    - run: flutter build ios --release --no-codesign --build-name=${{ inputs.version }} --build-number=${{ github.run_number }} --dart-define=BASE_URL=${{ env.BASE_URL }}
+    - run: flutter build ios --release --no-codesign --build-name=${{ inputs.version }} --dart-define=BASE_URL=${{ env.BASE_URL }}
     - name: Verify Packet Tunnel structure
       run: |
         set -euo pipefail
@@ -126,7 +126,7 @@ jobs:
         flutter-version: 3.44.x
     - run: flutter pub get
     - run: flutter config --enable-windows-desktop
-    - run: flutter build windows --release --build-name=${{ inputs.version }} --build-number=${{ github.run_number }} --dart-define=BASE_URL=${{ env.BASE_URL }}
+    - run: flutter build windows --release --build-name=${{ inputs.version }} --dart-define=BASE_URL=${{ env.BASE_URL }}
     - name: Show Windows build output
       shell: pwsh
       run: Get-ChildItem -Recurse build/windows | Select-Object FullName,Length | Out-String -Width 240
@@ -178,7 +178,7 @@ jobs:
         grep -n "MACOSX_DEPLOYMENT_TARGET" macos/Runner.xcodeproj/project.pbxproj || true
     - run: flutter pub get
     - run: flutter config --enable-macos-desktop
-    - run: flutter build macos --release --build-name=${{ inputs.version }} --build-number=${{ github.run_number }} --dart-define=BASE_URL=${{ env.BASE_URL }}
+    - run: flutter build macos --release --build-name=${{ inputs.version }} --dart-define=BASE_URL=${{ env.BASE_URL }}
     - name: Package macOS
       run: ditto -c -k --sequesterRsrc --keepParent build/macos/Build/Products/Release/Osca.app "Osca-macOS-v${{ inputs.version }}.zip"
     - uses: actions/upload-artifact@v4
