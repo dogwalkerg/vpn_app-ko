@@ -1,5 +1,6 @@
 // lib/ui/widgets/app_custom_appbar.dart
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:vpn_app/core/extensions/context_ext.dart';
 
 class AppCustomAppBar extends StatelessWidget implements PreferredSizeWidget {
@@ -23,9 +24,19 @@ class AppCustomAppBar extends StatelessWidget implements PreferredSizeWidget {
   Widget build(BuildContext context) {
     final c = context.colors;
     final t = context.tokens;
+    final platform = Theme.of(context).platform;
+    final usesMobileStatusBar =
+        platform == TargetPlatform.android || platform == TargetPlatform.iOS;
 
     return AppBar(
       backgroundColor: Colors.transparent,
+      systemOverlayStyle: usesMobileStatusBar
+          ? const SystemUiOverlayStyle(
+              statusBarColor: Colors.transparent,
+              statusBarBrightness: Brightness.light,
+              statusBarIconBrightness: Brightness.dark,
+            )
+          : null,
       elevation: t.elevations.none,
       centerTitle: centerTitle,
       leading: leading,

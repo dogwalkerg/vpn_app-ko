@@ -3,7 +3,11 @@ import 'dart:io';
 import 'package:image/image.dart' as image;
 
 const _sourcePath = 'assets/icons/icon_512x512.png';
-const _outputPath = 'windows/runner/resources/app_icon.ico';
+const _outputPaths = <String>[
+  'windows/runner/resources/app_icon.ico',
+  'assets/tray/tray_icon_connect.ico',
+  'assets/tray/tray_icon_disconnect.ico',
+];
 const _sizes = <int>[16, 20, 24, 32, 40, 48, 64, 96, 128, 256];
 
 void main() {
@@ -27,5 +31,8 @@ void main() {
     icon.addFrame(frame);
   }
 
-  File(_outputPath).writeAsBytesSync(image.encodeIco(icon));
+  final bytes = image.encodeIco(icon);
+  for (final path in _outputPaths) {
+    File(path).writeAsBytesSync(bytes);
+  }
 }
