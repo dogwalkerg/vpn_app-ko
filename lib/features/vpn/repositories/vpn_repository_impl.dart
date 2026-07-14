@@ -297,7 +297,9 @@ class VpnRepositoryImpl implements VpnRepository {
         );
       },
     );
-    await engine.initializeV2Ray();
+    await engine.initializeV2Ray(
+      notificationIconResourceName: 'ic_launcher2',
+    );
     final parser = FlutterV2ray.parseFromURL(node.raw);
     final config = await prepareAndroidV2rayConfig(
       parser.getFullConfiguration(),

@@ -6,7 +6,7 @@ on:
       version:
         description: Release version
         required: true
-        default: 1.0.27
+        default: 1.0.32
       publish_release:
         description: Publish the signed IPA to GitHub Releases
         type: boolean
@@ -91,15 +91,15 @@ jobs:
 
       - name: Package unsigned compile-check artifact
         run: |
-          rm -rf Payload app-ios-unsigned-compile-check.ipa
+          rm -rf Payload "Osca-iOS-v${{ inputs.version }}-unsigned.ipa"
           mkdir Payload
           ditto build/ios/iphoneos/Runner.app Payload/Runner.app
-          ditto -c -k --sequesterRsrc --keepParent Payload app-ios-unsigned-compile-check.ipa
+          ditto -c -k --sequesterRsrc --keepParent Payload "Osca-iOS-v${{ inputs.version }}-unsigned.ipa"
 
       - uses: actions/upload-artifact@v4
         with:
-          name: ios-unsigned-compile-check
-          path: app-ios-unsigned-compile-check.ipa
+          name: Osca-iOS-unsigned
+          path: Osca-iOS-v${{ inputs.version }}-unsigned.ipa
           if-no-files-found: error
 
       - name: Require complete iOS signing secrets
@@ -226,12 +226,12 @@ jobs:
           /usr/libexec/PlistBuddy -c 'Print :com.apple.developer.networking.networkextension' "${RUNNER_TEMP}/tunnel-entitlements.plist" | grep -Fq packet-tunnel-provider
           /usr/libexec/PlistBuddy -c 'Print :com.apple.security.application-groups' "${RUNNER_TEMP}/app-entitlements.plist" | grep -Fq group.a3ccc1476ba7bbb2.1
           /usr/libexec/PlistBuddy -c 'Print :com.apple.security.application-groups' "${RUNNER_TEMP}/tunnel-entitlements.plist" | grep -Fq group.a3ccc1476ba7bbb2.1
-          cp "${ipa}" "app-ios-${{ inputs.version }}-signed.ipa"
+          cp "${ipa}" "Osca-iOS-v${{ inputs.version }}-signed.ipa"
 
       - uses: actions/upload-artifact@v4
         with:
-          name: ios-signed-ipa
-          path: app-ios-${{ inputs.version }}-signed.ipa
+          name: Osca-iOS-signed
+          path: Osca-iOS-v${{ inputs.version }}-signed.ipa
           if-no-files-found: error
 
       - name: Publish iOS release
@@ -239,10 +239,10 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           tag_name: v${{ inputs.version }}
-          name: iOS v${{ inputs.version }}
+          name: Osca iOS v${{ inputs.version }}
           target_commitish: ${{ github.sha }}
           body: Signed iOS build with Xray Packet Tunnel extension.
-          files: app-ios-${{ inputs.version }}-signed.ipa
+          files: Osca-iOS-v${{ inputs.version }}-signed.ipa
 
       - name: Delete temporary signing keychain
         if: always()

@@ -100,7 +100,7 @@ class _MyApp extends ConsumerWidget {
     final router = ref.watch(routerProvider);
 
     return MaterialApp.router(
-      title: '自由云',
+      title: 'Osca',
       theme: appLightTheme,
       routerConfig: router,
       debugShowCheckedModeBanner: false,

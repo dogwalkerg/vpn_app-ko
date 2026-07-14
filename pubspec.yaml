@@ -2,7 +2,7 @@ name: vpn_app
 description: "A new Flutter project."
 publish_to: 'none'
 
-version: 1.0.31+75
+version: 1.0.32+76
 
 environment:
   sdk: ">=3.8.0 <4.0.0"
@@ -37,6 +37,7 @@ dependencies:
 
 dev_dependencies:
   flutter_launcher_icons: ^0.14.4
+  image: ^4.9.1
   flutter_test:
     sdk: flutter
   flutter_lints: ^5.0.0
@@ -46,11 +47,12 @@ dev_dependencies:
 
 flutter_launcher_icons:
   image_path: "assets/icons/icon_512x512.png"
-  android: true
+  android: "ic_launcher2"
   ios: true
+  remove_alpha_ios: true
+  background_color_ios: "#FFFFFF"
   macos:
     generate: true
-    icon_size: 256
   windows:
     generate: true
     icon_size: 256
