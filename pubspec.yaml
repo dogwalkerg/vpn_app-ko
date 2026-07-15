@@ -2,7 +2,7 @@ name: vpn_app
 description: "A new Flutter project."
 publish_to: 'none'
 
-version: 1.0.39+83
+version: 1.0.40+84
 
 environment:
   sdk: ">=3.8.0 <4.0.0"

@@ -153,4 +153,35 @@ void main() {
     expect(stopBlock, contains('state: "DISCONNECTING"'));
     expect(stopBlock, isNot(contains('state: "CONNECTED"')));
   });
+
+  test('iOS health probes are diagnostic-only under sustained load', () {
+    final provider = File(
+      'ios/XrayTunnel/PacketTunnelProvider.swift',
+    ).readAsStringSync();
+    final plugin = File(
+      'third_party/flutter_vless_ios/ios/flutter_vless/'
+      'Sources/flutter_vless/FlutterVlessPlugin.swift',
+    ).readAsStringSync();
+
+    expect(provider, contains('logStartupHealthDiagnostic()'));
+    expect(provider, contains('message == "xray_health"'));
+    expect(provider, isNot(contains('startContinuousHealthMonitoring')));
+    expect(provider, isNot(contains('consecutiveHealthFailures')));
+    expect(provider, isNot(contains('handleHealthResult')));
+    expect(plugin, isNot(contains('pollTunnelHealthForDiagnostics')));
+  });
+
+  test('iOS uses the verified v1.0.35 route and HEV stop policy', () {
+    final provider = File(
+      'ios/XrayTunnel/PacketTunnelProvider.swift',
+    ).readAsStringSync();
+
+    expect(provider, contains('settings.ipv6Settings = nil'));
+    expect(
+      provider,
+      contains('routes.append(contentsOf: TunnelRuntimePolicy.dnsServers.map'),
+    );
+    expect(provider, isNot(contains('NEIPv6Route.default()')));
+    expect(provider, isNot(contains('asyncAfter(deadline: .now() + 0.1)')));
+  });
 }

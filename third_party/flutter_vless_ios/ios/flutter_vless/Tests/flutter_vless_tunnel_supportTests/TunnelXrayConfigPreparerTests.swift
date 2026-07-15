@@ -91,7 +91,7 @@ final class TunnelXrayConfigPreparerTests: XCTestCase {
 
         let sniffing = try XCTUnwrap(inbounds[0]["sniffing"] as? [String: Any])
         XCTAssertEqual(sniffing["enabled"] as? Bool, true)
-        XCTAssertEqual(sniffing["routeOnly"] as? Bool, true)
+        XCTAssertEqual(sniffing["routeOnly"] as? Bool, false)
         XCTAssertEqual(sniffing["destOverride"] as? [String], ["http", "tls", "quic"])
     }
 
@@ -194,7 +194,7 @@ final class TunnelXrayConfigPreparerTests: XCTestCase {
         XCTAssertFalse(result.logMessages.contains("Added XHTTP UDP/443 block rule to force browser TCP fallback"))
     }
 
-    func testPinsXhttpEndpointButPreservesHTTPHost() throws {
+    func testKeepsXhttpNoneDomainForXrayResolution() throws {
         let input = try jsonData([
             "inbounds": [["port": 10807, "protocol": "socks"]],
             "outbounds": [[
@@ -225,9 +225,9 @@ final class TunnelXrayConfigPreparerTests: XCTestCase {
         let stream = try XCTUnwrap(proxy["streamSettings"] as? [String: Any])
         let xhttp = try XCTUnwrap(stream["xhttpSettings"] as? [String: Any])
 
-        XCTAssertEqual(vnext[0]["address"] as? String, "203.0.113.22")
-        XCTAssertEqual(xhttp["host"] as? String, "bootstrap.example.com")
-        XCTAssertTrue(result.logMessages.contains("Pinned XHTTP proxy endpoint to IPv4 while preserving its HTTP host"))
+        XCTAssertEqual(vnext[0]["address"] as? String, "bootstrap.example.com")
+        XCTAssertNil(xhttp["host"])
+        XCTAssertTrue(result.logMessages.contains("Keeping XHTTP/none proxy domain in Xray config"))
     }
 
     func testHealthEvaluatorRequiresExact204() {
@@ -248,21 +248,11 @@ final class TunnelXrayConfigPreparerTests: XCTestCase {
         XCTAssertNil(malformed.statusCode)
     }
 
-    func testNetworkPolicyNeverExcludesTunnelDNS() {
-        XCTAssertTrue(TunnelRuntimePolicy.routesDNSInsideTunnel)
-        XCTAssertTrue(TunnelRuntimePolicy.capturesIPv6DefaultRoute)
-        XCTAssertEqual(
-            TunnelRuntimePolicy.proxyEndpointExclusions([
-                "1.1.1.1", "8.8.8.8", "203.0.113.10", "203.0.113.10"
-            ]),
-            ["203.0.113.10"]
-        )
-        XCTAssertEqual(
-            TunnelRuntimePolicy.safeIPv4BypassCIDRs([
-                "0.0.0.0/0", "1.1.1.1/32", "192.168.0.0/16"
-            ]),
-            ["192.168.0.0/16"]
-        )
+    func testNetworkPolicyMatchesVerifiedV1035DataPath() {
+        XCTAssertFalse(TunnelRuntimePolicy.routesDNSInsideTunnel)
+        XCTAssertFalse(TunnelRuntimePolicy.capturesIPv6DefaultRoute)
+        XCTAssertEqual(TunnelRuntimePolicy.dnsServers, ["1.1.1.1", "8.8.8.8"])
+        XCTAssertEqual(TunnelRuntimePolicy.sessionPersistenceIntervalSeconds, 10)
     }
 
     func testSessionAndHealthSnapshotsRoundTrip() throws {

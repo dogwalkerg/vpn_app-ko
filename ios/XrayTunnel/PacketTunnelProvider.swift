@@ -17,6 +17,7 @@ private let tunnelLog = Logger(
     category: "PacketTunnel"
 )
 private let tunnelMTU = 1500
+private let sessionPersistenceInterval = TunnelRuntimePolicy.sessionPersistenceIntervalSeconds
 #if DEBUG
 private let providerTrafficLogInterval: TimeInterval = 5
 #else
@@ -67,6 +68,7 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
     private let lifecycleLock = NSLock()
     private let healthLock = NSLock()
     private let hevLifecycleLock = NSLock()
+    private let sessionPersistenceLock = NSLock()
     private let healthQueue = DispatchQueue(label: "flutter_vless.packet_tunnel.health", qos: .utility)
     private var tunnelStopping = false
     private var xrayRunning = false
@@ -79,9 +81,8 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
         generation: UInt64,
         completion: (TunnelHealthSnapshot) -> Void
     )] = []
-    private var consecutiveHealthFailures = 0
-    private var healthTimer: DispatchSourceTimer?
     private var lastTrafficLogDate: Date = .distantPast
+    private var lastSessionPersistenceDate: Date = .distantPast
     private var hevLogURL: URL?
     private var sharedStateStore: TunnelSharedStateStore?
     private var tunnelSessionId = ""
@@ -110,13 +111,13 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
         self.sharedStateStore = sharedStateStore
         tunnelSessionId = UUID().uuidString.lowercased()
         tunnelStartedAtMilliseconds = Int64(Date().timeIntervalSince1970 * 1000)
-        sharedStateStore.save(session: TunnelSessionSnapshot(
+        persistSessionSnapshot(TunnelSessionSnapshot(
             sessionId: tunnelSessionId,
             startedAtMilliseconds: tunnelStartedAtMilliseconds,
             running: true,
             uploadBytes: 0,
             downloadBytes: 0
-        ))
+        ), force: true)
         tunnelLog.info("Received Xray config bytes=\(xrayConfig.count, privacy: .public)")
         let preparedXrayConfig = prepareXrayConfigForTunnel(xrayConfig) ?? xrayConfig
         let bypassSubnets = providerConfiguration["bypassSubnets"] as? [String] ?? []
@@ -128,11 +129,6 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
             throw tunnelError("Unable to find a SOCKS/HTTP inbound port in Xray config")
         }
         inboundPort = parsedConfig.inboundPort
-        if let serverAddress = parsedConfig.serverAddress,
-           !isIPv4Literal(serverAddress),
-           !isIPv6Literal(serverAddress) {
-            throw tunnelError("Proxy server domain was not resolved before tunnel routing: \(serverAddress)")
-        }
         rememberTunnelLog("Using local Xray inbound port \(parsedConfig.inboundPort), server=\(parsedConfig.serverAddress ?? "nil")")
         tunnelLog.info("Using local Xray inbound port \(parsedConfig.inboundPort, privacy: .public)")
 
@@ -148,42 +144,25 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
             tunnelLog.info("IPv4 settings address=198.18.0.1/16 includedRoutes=default excludedRoutes=\(settings.excludedRoutes?.count ?? 0, privacy: .public)")
             return settings
         }()
-        settings.ipv6Settings = {
-            let settings = NEIPv6Settings(
-                addresses: ["fd00:198:18::1"],
-                networkPrefixLengths: [64]
-            )
-            // Capturing ::/0 prevents Safari or another app from falling back
-            // to the physical IPv6 interface when the selected node is IPv4.
-            // HEV and Xray can carry IPv6 destinations; unsupported traffic
-            // fails inside the tunnel instead of exposing the real IPv6 path.
-            settings.includedRoutes = [NEIPv6Route.default()]
-            settings.excludedRoutes = buildIPv6ExcludedRoutes(serverAddress: parsedConfig.serverAddress)
-            return settings
-        }()
-        rememberTunnelLog("IPv6 default route captured by packet tunnel")
-        tunnelLog.info("IPv6 default route captured by packet tunnel")
+        // This is the data path proven stable in v1.0.35. Capturing ::/0 sent
+        // IPv6/QUIC traffic into an unverified path and caused slow or stalled
+        // media transfers on otherwise healthy nodes.
+        settings.ipv6Settings = nil
+        rememberTunnelLog("IPv6 tunnel routing disabled; using verified IPv4 packet path")
+        tunnelLog.info("IPv6 tunnel routing disabled; using verified IPv4 packet path")
         settings.dnsSettings = {
-            // These resolver addresses are deliberately not excluded below.
-            // Their UDP/TCP packets therefore follow the same HEV -> SOCKS ->
-            // Xray path as browser traffic and cannot leave on the physical
-            // Wi-Fi/cellular interface.
             let settings = NEDNSSettings(servers: TunnelRuntimePolicy.dnsServers)
             settings.matchDomains = [""]
             return settings
         }()
-        rememberTunnelLog("DNS captured by tunnel servers=\(TunnelRuntimePolicy.dnsServers.joined(separator: ","))")
+        rememberTunnelLog("DNS resolver routes excluded for stable bootstrap: \(TunnelRuntimePolicy.dnsServers.joined(separator: ","))")
         tunnelLog.info("Applying tunnel network settings")
         do {
             try await self.setTunnelNetworkSettings(settings)
             tunnelLog.info("Tunnel network settings applied")
             try self.startXRay(xrayConfig: preparedXrayConfig)
             try self.startSocks5Tunnel(serverPort: parsedConfig.inboundPort)
-            let initialHealth = await waitForInitialHealth()
-            guard initialHealth.healthy else {
-                throw tunnelError(initialHealth.failureReason ?? "Packet tunnel health check failed")
-            }
-            startContinuousHealthMonitoring()
+            logStartupHealthDiagnostic()
         } catch {
             failTunnel(error)
             throw error
@@ -194,8 +173,7 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
         invalidateHealthChecks()
         tunnelLog.info("Stopping Xray packet tunnel, reason: \(reason.rawValue, privacy: .public)")
         logTrafficStats(context: "stop")
-        stopContinuousHealthMonitoring()
-        persistSession(running: false)
+        persistSession(running: false, force: true)
         persistHealth(healthy: false, failureReason: "Tunnel stopped (reason \(reason.rawValue))")
         stopRuntime()
         completionHandler()
@@ -205,15 +183,13 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
         if let message = String(data: messageData, encoding: .utf8) {
             if (message == "xray_traffic"){
                 logTrafficStats(context: "poll")
-                persistSession(running: true)
-                completionHandler?(runtimeSnapshotData())
+                completionHandler?(runtimeSnapshotData(persist: true))
             } else if (message == "xray_health") {
                 requestHealthCheck { snapshot in
                     completionHandler?(snapshot.jsonData())
                 }
             } else if (message == "xray_snapshot") {
-                persistSession(running: true)
-                completionHandler?(runtimeSnapshotData())
+                completionHandler?(runtimeSnapshotData(persist: true))
             } else if (message == "xray_debug") {
                 // This bridge is intentionally part of the runtime API used by
                 // smoke tests and manual Xcode runs. It is the fastest way to
@@ -373,16 +349,14 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
     }
 
     private func buildIPv4ExcludedRoutes(serverAddress: String?, bypassSubnets: [String]) -> [NEIPv4Route] {
-        let safeBypassSubnets = TunnelRuntimePolicy.safeIPv4BypassCIDRs(bypassSubnets)
-        if safeBypassSubnets.count != bypassSubnets.count {
-            rememberTunnelLog("Ignored bypass subnet that would route tunnel DNS physically")
-            tunnelLog.warning("Ignored bypass subnet that contains a tunnel DNS server")
-        }
-        var routes = safeBypassSubnets.compactMap { ipv4Route(fromCIDR: $0) }
+        var routes = bypassSubnets.compactMap { ipv4Route(fromCIDR: $0) }
+        routes.append(contentsOf: TunnelRuntimePolicy.dnsServers.map {
+            NEIPv4Route(destinationAddress: $0, subnetMask: "255.255.255.255")
+        })
+        rememberTunnelLog("Excluded DNS route(s): \(TunnelRuntimePolicy.dnsServers.joined(separator: ","))")
+        tunnelLog.info("Excluded \(TunnelRuntimePolicy.dnsServers.count, privacy: .public) DNS route(s) from VPN")
         if let serverAddress {
-            let serverAddresses = TunnelRuntimePolicy.proxyEndpointExclusions(
-                resolveIPv4Addresses(for: serverAddress)
-            )
+            let serverAddresses = resolveIPv4Addresses(for: serverAddress)
             let serverRoutes = serverAddresses.map {
                 NEIPv4Route(destinationAddress: $0, subnetMask: "255.255.255.255")
             }
@@ -723,7 +697,6 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
 
             if shouldApply {
                 completions.forEach { $0(snapshot) }
-                self.handleHealthResult(snapshot)
             } else {
                 let cancelled = self.cancelledHealthSnapshot()
                 completions.forEach { $0(cancelled) }
@@ -799,78 +772,58 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
         )
     }
 
-    private func waitForInitialHealth() async -> TunnelHealthSnapshot {
-        var latest = healthSnapshot(
-            healthy: false,
-            socksInboundReady: false,
-            httpResult: failedHTTPProbe("Initial health check has not run"),
-            xrayRunning: isXrayRunning(),
-            hevRunning: isHevRunning()
-        )
-        for attempt in 1...2 {
-            try? await Task.sleep(nanoseconds: attempt == 1 ? 500_000_000 : 750_000_000)
-            latest = await withCheckedContinuation { continuation in
-                requestHealthCheck { continuation.resume(returning: $0) }
-            }
-            if latest.healthy { return latest }
-            rememberTunnelLog("Initial tunnel health attempt \(attempt) failed: \(latest.failureReason ?? "unknown")")
-        }
-        return latest
-    }
-
-    private func startContinuousHealthMonitoring() {
-        stopContinuousHealthMonitoring()
-        let timer = DispatchSource.makeTimerSource(queue: healthQueue)
-        timer.schedule(deadline: .now() + 15, repeating: 15, leeway: .seconds(2))
-        timer.setEventHandler { [weak self] in
-            self?.requestHealthCheck { _ in }
-        }
-        healthTimer = timer
-        timer.resume()
-    }
-
-    private func stopContinuousHealthMonitoring() {
-        healthTimer?.setEventHandler {}
-        healthTimer?.cancel()
-        healthTimer = nil
-    }
-
-    private func handleHealthResult(_ snapshot: TunnelHealthSnapshot) {
-        healthLock.lock()
-        if snapshot.runtimeReady {
-            consecutiveHealthFailures = 0
-            healthLock.unlock()
-            if !snapshot.healthy {
-                rememberTunnelLog("Public health probe degraded while Xray, HEV, and SOCKS remain ready; keeping tunnel active")
-                tunnelLog.warning("Public health probe degraded while tunnel runtime remains ready")
-            }
-            return
-        }
-        consecutiveHealthFailures += 1
-        let shouldCancel = consecutiveHealthFailures >= 3
-        healthLock.unlock()
-        guard shouldCancel, !isTunnelStopping() else { return }
-        DispatchQueue.main.async { [weak self] in
+    private func logStartupHealthDiagnostic() {
+        healthQueue.asyncAfter(deadline: .now() + 0.5) { [weak self] in
             guard let self, !self.isTunnelStopping() else { return }
-            self.failTunnel(self.tunnelError(snapshot.failureReason ?? "Tunnel health failed"))
+            self.requestHealthCheck { snapshot in
+                if snapshot.healthy {
+                    rememberTunnelLog("Startup health diagnostic passed")
+                } else {
+                    rememberTunnelLog("Startup health diagnostic failed without stopping tunnel: \(snapshot.failureReason ?? "unknown")")
+                    tunnelLog.warning("Startup health diagnostic failed; tunnel remains active")
+                }
+            }
         }
     }
 
-    private func runtimeSnapshotData() -> Data? {
-        let snapshot = sharedStateStore?.snapshot() ?? TunnelRuntimeSnapshot(session: nil, health: nil)
+    private func runtimeSnapshotData(persist: Bool) -> Data? {
+        let session = currentSessionSnapshot(running: true)
+        if persist, let session {
+            persistSessionSnapshot(session, force: false)
+        }
+        let snapshot = TunnelRuntimeSnapshot(
+            session: session ?? sharedStateStore?.loadSession(),
+            health: sharedStateStore?.loadHealth()
+        )
         return snapshot.jsonData()
     }
 
-    private func persistSession(running: Bool) {
-        guard !tunnelSessionId.isEmpty else { return }
+    private func currentSessionSnapshot(running: Bool) -> TunnelSessionSnapshot? {
+        guard !tunnelSessionId.isEmpty else { return nil }
         let stats = Socks5Tunnel.stats
-        sharedStateStore?.save(session: TunnelSessionSnapshot(
+        return TunnelSessionSnapshot(
             sessionId: tunnelSessionId,
             startedAtMilliseconds: tunnelStartedAtMilliseconds,
             running: running,
             uploadBytes: counterValue(stats.up.bytes),
             downloadBytes: counterValue(stats.down.bytes)
-        ))
+        )
+    }
+
+    private func persistSession(running: Bool, force: Bool) {
+        guard let session = currentSessionSnapshot(running: running) else { return }
+        persistSessionSnapshot(session, force: force)
+    }
+
+    private func persistSessionSnapshot(_ snapshot: TunnelSessionSnapshot, force: Bool) {
+        let now = Date()
+        sessionPersistenceLock.lock()
+        let shouldPersist = force || now.timeIntervalSince(lastSessionPersistenceDate) >= sessionPersistenceInterval
+        if shouldPersist {
+            lastSessionPersistenceDate = now
+            sharedStateStore?.save(session: snapshot)
+        }
+        sessionPersistenceLock.unlock()
     }
 
     private func persistHealth(healthy: Bool, failureReason: String) {
@@ -901,8 +854,7 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
 
         rememberTunnelLog("Cancelling packet tunnel: \(error.localizedDescription)")
         invalidateHealthChecks()
-        stopContinuousHealthMonitoring()
-        persistSession(running: false)
+        persistSession(running: false, force: true)
         persistHealth(healthy: false, failureReason: error.localizedDescription)
         stopRuntime()
         cancelTunnelWithError(error)
@@ -962,19 +914,11 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
         hevLifecycleLock.lock()
         let shouldQuit = hevLifecycleState == .running
         hevGeneration &+= 1
-        let stopGeneration = hevGeneration
         hevLifecycleState = .stopping
         hevLifecycleLock.unlock()
         setHevRunning(false)
 
         if shouldQuit {
-            Socks5Tunnel.quit()
-        }
-        // Covers the narrow transition between the final start check and the
-        // native blocking call. A newer tunnel increments the generation and
-        // is therefore never affected by this delayed quit.
-        DispatchQueue.global(qos: .utility).asyncAfter(deadline: .now() + 0.1) { [weak self] in
-            guard let self, self.isHevStopping(generation: stopGeneration) else { return }
             Socks5Tunnel.quit()
         }
     }
@@ -983,12 +927,6 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
         hevLifecycleLock.lock()
         defer { hevLifecycleLock.unlock() }
         return generation == hevGeneration && hevLifecycleState == .running
-    }
-
-    private func isHevStopping(generation: UInt64) -> Bool {
-        hevLifecycleLock.lock()
-        defer { hevLifecycleLock.unlock() }
-        return generation == hevGeneration && hevLifecycleState == .stopping
     }
 
     private func setXrayRunning(_ value: Bool) {
@@ -1024,7 +962,6 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
     private func beginHealthGeneration() {
         healthLock.lock()
         healthGeneration &+= 1
-        consecutiveHealthFailures = 0
         healthLock.unlock()
     }
 
@@ -1052,20 +989,6 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
         guard let hevLogURL else { return nil }
         TunnelRotatingLog.rotateIfNeeded(at: hevLogURL)
         return TunnelRotatingLog.tail(at: hevLogURL)
-    }
-
-    private func buildIPv6ExcludedRoutes(serverAddress: String?) -> [NEIPv6Route] {
-        guard let serverAddress else { return [] }
-        let serverAddresses = TunnelRuntimePolicy.proxyEndpointExclusions(
-            resolveIPv6Addresses(for: serverAddress)
-        )
-        let routes = serverAddresses.map {
-            NEIPv6Route(destinationAddress: $0, networkPrefixLength: 128)
-        }
-        if !routes.isEmpty {
-            tunnelLog.info("Excluded \(routes.count, privacy: .public) IPv6 server route(s) from VPN: \(serverAddresses.joined(separator: ","), privacy: .public)")
-        }
-        return routes
     }
 
     private func ipv4Route(fromCIDR cidr: String) -> NEIPv4Route? {
@@ -1101,13 +1024,6 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
             return [host]
         }
         return resolveAddresses(for: host, family: AF_INET)
-    }
-
-    private func resolveIPv6Addresses(for host: String) -> [String] {
-        if isIPv6Literal(host) {
-            return [host]
-        }
-        return resolveAddresses(for: host, family: AF_INET6)
     }
 
     private func resolveAddresses(for host: String, family: Int32) -> [String] {
@@ -1153,11 +1069,6 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
     private func isIPv4Literal(_ address: String) -> Bool {
         var addr = in_addr()
         return address.withCString { inet_pton(AF_INET, $0, &addr) } == 1
-    }
-
-    private func isIPv6Literal(_ address: String) -> Bool {
-        var addr = in6_addr()
-        return address.withCString { inet_pton(AF_INET6, $0, &addr) } == 1
     }
 
     private func tunnelError(_ message: String) -> NSError {

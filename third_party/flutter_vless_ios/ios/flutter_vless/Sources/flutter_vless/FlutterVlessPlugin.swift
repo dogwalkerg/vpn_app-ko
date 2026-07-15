@@ -17,11 +17,9 @@ private let pluginLog = Logger(
 
 #if DEBUG
 private let routineLogInterval: TimeInterval = 5
-private let healthDiagnosticInterval: TimeInterval = 15
 private let shouldMirrorProviderDebugSnapshots = true
 #else
 private let routineLogInterval: TimeInterval = 60
-private let healthDiagnosticInterval: TimeInterval = 60
 private let shouldMirrorProviderDebugSnapshots = false
 #endif
 
@@ -291,9 +289,7 @@ public class FlutterVlessPlugin: NSObject, FlutterPlugin, FlutterStreamHandler {
     private var downloadSpeed: Int = 0
     private var lastTrafficLogDate: Date = .distantPast
     private var lastProviderDebugLogDate: Date = .distantPast
-    private var lastHealthLogDate: Date = .distantPast
     private var trafficPollInFlight = false
-    private var healthPollInFlight = false
     private var currentSessionId: String?
     private var stopPreparationInFlight = false
     private var pendingStopResults: [FlutterResult] = []
@@ -321,7 +317,7 @@ public class FlutterVlessPlugin: NSObject, FlutterPlugin, FlutterStreamHandler {
         return nil
     }
 
-    /// Polls traffic counters and periodically mirrors provider diagnostics.
+    /// Polls traffic counters while the Packet Tunnel is connected.
     ///
     /// The packet tunnel lives in a separate extension process. Emitting the
     /// provider snapshot every few seconds keeps real-device evidence in the
@@ -365,9 +361,6 @@ public class FlutterVlessPlugin: NSObject, FlutterPlugin, FlutterStreamHandler {
             }
 
             self.pollTunnelRuntime()
-            if Date().timeIntervalSince(self.lastHealthLogDate) >= healthDiagnosticInterval {
-                self.pollTunnelHealthForDiagnostics()
-            }
         })
         self.timer = timer
         RunLoop.main.add(timer, forMode: .common)
@@ -437,41 +430,6 @@ public class FlutterVlessPlugin: NSObject, FlutterPlugin, FlutterStreamHandler {
         }
     }
 
-    private func pollTunnelHealthForDiagnostics() {
-        guard !healthPollInFlight else { return }
-        healthPollInFlight = true
-        Task { [weak self] in
-            guard let self else { return }
-            defer {
-                DispatchQueue.main.async { [weak self] in
-                    self?.healthPollInFlight = false
-                }
-            }
-            do {
-                guard let response = try await self.packetTunnelManager?.sendProviderMessage(
-                    data: Data("xray_health".utf8)
-                ) else { return }
-                guard let health = try? JSONSerialization.jsonObject(with: response) as? [String: Any] else {
-                    pluginLog.error("Provider returned malformed health data")
-                    return
-                }
-                await MainActor.run {
-                    self.lastHealthLogDate = Date()
-                }
-                let healthy = health["healthy"] as? Bool ?? false
-                let status = Self.integer(health["httpStatusCode"])
-                let reason = health["failureReason"] as? String ?? "unknown"
-                if healthy && status == TunnelRuntimePolicy.healthProbeExpectedStatus {
-                    pluginLog.info("Tunnel health exact HTTP \(status, privacy: .public)")
-                } else {
-                    pluginLog.error("Tunnel health failed status=\(status, privacy: .public) reason=\(reason, privacy: .public)")
-                }
-            } catch {
-                pluginLog.error("Provider health poll failed: \(error.localizedDescription, privacy: .public)")
-            }
-        }
-    }
-
     private func restoreRuntimeSnapshotFromAppGroup() {
         guard let snapshot = packetTunnelManager?.sharedRuntimeSnapshot(),
               let data = snapshot.jsonData() else { return }
@@ -502,7 +460,6 @@ public class FlutterVlessPlugin: NSObject, FlutterPlugin, FlutterStreamHandler {
         self.totalUpload = 0
         self.totalDownload = 0
         self.trafficPollInFlight = false
-        self.healthPollInFlight = false
         self.lastProviderDebugLogDate = .distantPast
     }
 

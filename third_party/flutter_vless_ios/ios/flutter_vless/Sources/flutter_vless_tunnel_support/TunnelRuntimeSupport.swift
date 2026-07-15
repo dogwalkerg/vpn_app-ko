@@ -7,44 +7,9 @@ public enum TunnelRuntimePolicy {
     public static let healthProbeExpectedStatus = 204
     public static let maximumHevLogBytes = 512 * 1024
     public static let retainedHevLogBytes = 96 * 1024
-    public static let capturesIPv6DefaultRoute = true
-    public static let routesDNSInsideTunnel = true
-
-    /// Only the physical proxy endpoint may bypass the tunnel to prevent a
-    /// routing loop. Public DNS resolver addresses must never appear here.
-    public static func proxyEndpointExclusions(_ addresses: [String]) -> [String] {
-        Array(Set(addresses.filter { !dnsServers.contains($0) })).sorted()
-    }
-
-    public static func safeIPv4BypassCIDRs(_ cidrs: [String]) -> [String] {
-        cidrs.filter { cidr in
-            !dnsServers.contains { ipv4Address($0, isContainedIn: cidr) }
-        }
-    }
-
-    private static func ipv4Address(_ address: String, isContainedIn cidr: String) -> Bool {
-        let parts = cidr.split(separator: "/", omittingEmptySubsequences: false)
-        guard parts.count == 2,
-              let network = ipv4Value(String(parts[0])),
-              let candidate = ipv4Value(address),
-              let prefix = Int(parts[1]),
-              (0...32).contains(prefix) else {
-            return false
-        }
-        let mask = prefix == 0 ? UInt32(0) : UInt32.max << UInt32(32 - prefix)
-        return (network & mask) == (candidate & mask)
-    }
-
-    private static func ipv4Value(_ value: String) -> UInt32? {
-        let octets = value.split(separator: ".", omittingEmptySubsequences: false)
-        guard octets.count == 4 else { return nil }
-        var result: UInt32 = 0
-        for octet in octets {
-            guard let number = UInt32(octet), number <= 255 else { return nil }
-            result = (result << 8) | number
-        }
-        return result
-    }
+    public static let capturesIPv6DefaultRoute = false
+    public static let routesDNSInsideTunnel = false
+    public static let sessionPersistenceIntervalSeconds: TimeInterval = 10
 
     public static var xrayLogLevel: String {
         #if DEBUG
