@@ -57,6 +57,49 @@ void main() {
     );
   });
 
+  group('iOS tunnel runtime readiness', () {
+    IosTunnelHealth health({
+      bool healthy = false,
+      bool xrayRunning = true,
+      bool hevRunning = true,
+      bool socksInboundReady = true,
+      int? providerHttpStatusCode,
+      int? httpStatusCode,
+    }) => IosTunnelHealth.fromMap({
+      'healthy': healthy,
+      'xrayRunning': xrayRunning,
+      'hevRunning': hevRunning,
+      'socksInboundReady': socksInboundReady,
+      'providerHttpStatusCode': providerHttpStatusCode,
+      'httpStatusCode': httpStatusCode,
+      'failureReason': 'Public probe timed out',
+    });
+
+    test('public probe degradation does not invalidate a ready runtime', () {
+      final degraded = health();
+
+      expect(degraded.runtimeReady, isTrue);
+      expect(degraded.hasExactHttp204, isFalse);
+    });
+
+    test('all local native components must remain available', () {
+      expect(health(xrayRunning: false).runtimeReady, isFalse);
+      expect(health(hevRunning: false).runtimeReady, isFalse);
+      expect(health(socksInboundReady: false).runtimeReady, isFalse);
+
+      // A successful public probe cannot hide a failed native component.
+      expect(
+        health(
+          healthy: true,
+          xrayRunning: false,
+          providerHttpStatusCode: 204,
+          httpStatusCode: 204,
+        ).runtimeReady,
+        isFalse,
+      );
+    });
+  });
+
   test('runtime snapshot restores persistent session totals', () {
     final snapshot = IosTunnelSnapshot.fromMap({
       'state': 'CONNECTED',

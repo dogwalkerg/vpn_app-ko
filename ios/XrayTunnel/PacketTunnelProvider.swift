@@ -837,9 +837,13 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
 
     private func handleHealthResult(_ snapshot: TunnelHealthSnapshot) {
         healthLock.lock()
-        if snapshot.healthy {
+        if snapshot.runtimeReady {
             consecutiveHealthFailures = 0
             healthLock.unlock()
+            if !snapshot.healthy {
+                rememberTunnelLog("Public health probe degraded while Xray, HEV, and SOCKS remain ready; keeping tunnel active")
+                tunnelLog.warning("Public health probe degraded while tunnel runtime remains ready")
+            }
             return
         }
         consecutiveHealthFailures += 1

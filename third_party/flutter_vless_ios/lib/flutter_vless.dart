@@ -101,6 +101,8 @@ class IosTunnelHealth {
 
   bool get hasExactHttp204 =>
       healthy && httpStatusCode == 204 && providerHttpStatusCode == 204;
+
+  bool get runtimeReady => xrayRunning && hevRunning && socksInboundReady;
 }
 
 class IosTunnelSnapshot {

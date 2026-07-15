@@ -616,16 +616,21 @@ Write-Output $pids[0]
 
   Future<bool> _verifyIosTunnel() async {
     if (!Platform.isIOS || !_iosVlessConnected) return false;
-    try {
-      final health = await _iosVless!.getTunnelHealth();
-      final sessionMatches =
-          health.sessionId == null ||
-          _iosVlessTrafficSessionId == null ||
-          health.sessionId == _iosVlessTrafficSessionId;
-      return sessionMatches && health.hasExactHttp204;
-    } catch (_) {
-      return false;
+    for (var attempt = 0; attempt < 3; attempt++) {
+      try {
+        final snapshot = await _iosVless!.getTunnelSnapshot();
+        if (iosTunnelSnapshotIsRuntimeReady(
+          snapshot,
+          expectedSessionId: _iosVlessTrafficSessionId,
+        )) {
+          return true;
+        }
+      } catch (_) {}
+      if (attempt < 2) {
+        await Future.delayed(const Duration(milliseconds: 250));
+      }
     }
+    return false;
   }
 
   Future<void> _stopV2rayAndWait({
@@ -754,22 +759,39 @@ Write-Output $pids[0]
 
   Future<void> _checkMobileHealth(int generation) async {
     if (generation != _mobileHealthGeneration) return;
-    var usable = false;
+    var disposition = MobileHealthDisposition.failed;
     String reason;
     if (Platform.isAndroid) {
       await _ensureAndroidV2rayInitialized();
       final status = await _v2ray!.getV2RayStatus();
       if (generation != _mobileHealthGeneration) return;
       _handleAndroidV2rayStatus(status);
-      usable = _v2rayConnected && await _verifyAndroidProxy();
+      final runtimeReady = _v2rayConnected;
+      disposition = classifyMobileHealth(
+        runtimeReady: runtimeReady,
+        publicReachable: runtimeReady && await _verifyAndroidProxy(),
+      );
       reason = status.error.isEmpty ? '当前节点已无法访问网络，请更换节点后重新连接' : status.error;
     } else {
-      // The iOS branch is completed by the Packet Tunnel health bridge below.
-      usable = _iosVlessConnected && await _verifyIosTunnel();
-      reason = '当前节点已无法访问网络，请更换节点后重新连接';
+      ios_vless.IosTunnelSnapshot? snapshot;
+      try {
+        snapshot = await _iosVless!.getTunnelSnapshot();
+      } catch (_) {}
+      final runtimeReady =
+          _iosVlessConnected &&
+          snapshot != null &&
+          iosTunnelSnapshotIsRuntimeReady(
+            snapshot,
+            expectedSessionId: _iosVlessTrafficSessionId,
+          );
+      disposition = classifyMobileHealth(
+        runtimeReady: runtimeReady,
+        publicReachable: snapshot?.health?.healthy == true,
+      );
+      reason = snapshot?.health?.failureReason ?? '当前节点已无法访问网络，请更换节点后重新连接';
     }
     if (generation != _mobileHealthGeneration) return;
-    if (usable) {
+    if (disposition != MobileHealthDisposition.failed) {
       _mobileConsecutiveProbeFailures = 0;
       return;
     }
@@ -1967,3 +1989,37 @@ bool macOSProxyRestoreSucceeded({
   required bool usesLocalCore,
   required Iterable<String> conflicts,
 }) => restored && !usesLocalCore && conflicts.isEmpty;
+
+enum MobileHealthDisposition { healthy, degraded, failed }
+
+MobileHealthDisposition classifyMobileHealth({
+  required bool runtimeReady,
+  required bool publicReachable,
+}) {
+  if (!runtimeReady) return MobileHealthDisposition.failed;
+  return publicReachable
+      ? MobileHealthDisposition.healthy
+      : MobileHealthDisposition.degraded;
+}
+
+bool iosTunnelSnapshotIsRuntimeReady(
+  ios_vless.IosTunnelSnapshot snapshot, {
+  String? expectedSessionId,
+}) {
+  final health = snapshot.health;
+  if (snapshot.state.toUpperCase() != 'CONNECTED' ||
+      !snapshot.running ||
+      health == null ||
+      !health.runtimeReady) {
+    return false;
+  }
+  final expected = expectedSessionId?.trim();
+  if (expected == null || expected.isEmpty) return true;
+  final nativeSessionIds = [snapshot.sessionId, health.sessionId]
+      .map((value) => value?.trim())
+      .whereType<String>()
+      .where((value) => value.isNotEmpty)
+      .toList(growable: false);
+  return nativeSessionIds.isNotEmpty &&
+      nativeSessionIds.every((value) => value == expected);
+}

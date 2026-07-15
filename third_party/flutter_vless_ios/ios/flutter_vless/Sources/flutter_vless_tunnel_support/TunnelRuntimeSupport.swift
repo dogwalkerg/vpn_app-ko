@@ -122,6 +122,10 @@ public struct TunnelHealthSnapshot: Codable, Equatable {
     public let failureReason: String?
     public let checkedAtMilliseconds: Int64
 
+    public var runtimeReady: Bool {
+        xrayRunning && hevRunning && socksInboundReady
+    }
+
     public init(
         sessionId: String,
         healthy: Bool,

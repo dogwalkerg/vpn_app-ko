@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
+import 'package:flutter_vless/flutter_vless.dart';
 import 'package:vpn_app/features/vpn/models/subscription_node.dart';
 import 'package:vpn_app/features/vpn/repositories/vpn_repository_impl.dart';
 
@@ -243,6 +244,118 @@ void main() {
           restored: true,
           usesLocalCore: true,
           conflicts: const [],
+        ),
+        isFalse,
+      );
+    });
+  });
+
+  group('mobile health policy', () {
+    test('public probe failure degrades without failing a ready runtime', () {
+      expect(
+        classifyMobileHealth(runtimeReady: true, publicReachable: false),
+        MobileHealthDisposition.degraded,
+      );
+      expect(
+        classifyMobileHealth(runtimeReady: true, publicReachable: true),
+        MobileHealthDisposition.healthy,
+      );
+      expect(
+        classifyMobileHealth(runtimeReady: false, publicReachable: true),
+        MobileHealthDisposition.failed,
+      );
+    });
+
+    test(
+      'iOS runtime remains usable while only the public probe is degraded',
+      () {
+        final snapshot = IosTunnelSnapshot.fromMap({
+          'state': 'CONNECTED',
+          'session': {'sessionId': 'ios-session-a', 'running': true},
+          'health': {
+            'sessionId': 'ios-session-a',
+            'healthy': false,
+            'xrayRunning': true,
+            'hevRunning': true,
+            'socksInboundReady': true,
+            'providerHttpStatusCode': 204,
+            'httpStatusCode': null,
+            'failureReason': 'System probe timed out',
+          },
+        });
+
+        expect(snapshot.health?.runtimeReady, isTrue);
+        expect(snapshot.health?.hasExactHttp204, isFalse);
+        expect(
+          iosTunnelSnapshotIsRuntimeReady(
+            snapshot,
+            expectedSessionId: 'ios-session-a',
+          ),
+          isTrue,
+        );
+      },
+    );
+
+    test('iOS runtime rejects local component and session failures', () {
+      IosTunnelSnapshot snapshot({
+        bool xray = true,
+        bool hev = true,
+        bool socks = true,
+        String state = 'CONNECTED',
+        bool running = true,
+        String? sessionId = 'actual',
+        String? healthSessionId = 'actual',
+      }) => IosTunnelSnapshot.fromMap({
+        'state': state,
+        'session': {
+          if (sessionId != null) 'sessionId': sessionId,
+          'running': running,
+        },
+        'health': {
+          if (healthSessionId != null) 'sessionId': healthSessionId,
+          'healthy': false,
+          'xrayRunning': xray,
+          'hevRunning': hev,
+          'socksInboundReady': socks,
+        },
+      });
+
+      expect(iosTunnelSnapshotIsRuntimeReady(snapshot(xray: false)), isFalse);
+      expect(iosTunnelSnapshotIsRuntimeReady(snapshot(hev: false)), isFalse);
+      expect(iosTunnelSnapshotIsRuntimeReady(snapshot(socks: false)), isFalse);
+      expect(
+        iosTunnelSnapshotIsRuntimeReady(snapshot(state: 'DISCONNECTED')),
+        isFalse,
+      );
+      expect(
+        iosTunnelSnapshotIsRuntimeReady(snapshot(running: false)),
+        isFalse,
+      );
+      expect(
+        iosTunnelSnapshotIsRuntimeReady(
+          snapshot(),
+          expectedSessionId: 'stale-session',
+        ),
+        isFalse,
+      );
+      expect(
+        iosTunnelSnapshotIsRuntimeReady(
+          snapshot(sessionId: 'expected', healthSessionId: 'stale-health'),
+          expectedSessionId: 'expected',
+        ),
+        isFalse,
+      );
+      expect(
+        iosTunnelSnapshotIsRuntimeReady(
+          snapshot(sessionId: 'stale-session', healthSessionId: 'expected'),
+          expectedSessionId: 'expected',
+        ),
+        isFalse,
+      );
+      expect(
+        iosTunnelSnapshotIsRuntimeReady(
+          snapshot(sessionId: null, healthSessionId: null),
+          expectedSessionId: 'expected',
         ),
         isFalse,
       );
