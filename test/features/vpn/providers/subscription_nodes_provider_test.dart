@@ -36,5 +36,33 @@ ss://method:password@example.org:8388#Valid
       expect(nodes.single.type, 'SS');
       expect(nodes.single.port, 8388);
     });
+
+    test('parses a standard base64 VMess node', () {
+      final payload = base64Encode(
+        utf8.encode(
+          jsonEncode({
+            'v': '2',
+            'ps': 'Japan VMess',
+            'add': 'vmess.example.com',
+            'port': '8443',
+            'id': '11111111-1111-1111-1111-111111111111',
+            'aid': '0',
+            'net': 'ws',
+            'type': 'none',
+            'host': 'cdn.example.com',
+            'path': '/ws',
+            'tls': 'tls',
+          }),
+        ),
+      ).replaceAll('=', '');
+
+      final nodes = parseSubscriptionNodes('vmess://$payload');
+
+      expect(nodes, hasLength(1));
+      expect(nodes.single.name, 'Japan VMess');
+      expect(nodes.single.type, 'VMESS');
+      expect(nodes.single.host, 'vmess.example.com');
+      expect(nodes.single.port, 8443);
+    });
   });
 }

@@ -1,9 +1,7 @@
 package com.github.blueboytm.flutter_v2ray.v2ray;
 
-import android.content.BroadcastReceiver;
 import android.content.Context;
 import android.content.Intent;
-import android.content.IntentFilter;
 import android.os.Build;
 
 import com.github.blueboytm.flutter_v2ray.v2ray.core.V2rayCoreManager;
@@ -13,8 +11,6 @@ import com.github.blueboytm.flutter_v2ray.v2ray.utils.AppConfigs;
 import com.github.blueboytm.flutter_v2ray.v2ray.utils.Utilities;
 
 import java.util.ArrayList;
-import java.util.concurrent.CountDownLatch;
-import java.util.concurrent.TimeUnit;
 
 import libv2ray.Libv2ray;
 
@@ -24,18 +20,6 @@ public class V2rayController {
         Utilities.copyAssets(context);
         AppConfigs.APPLICATION_ICON = app_icon;
         AppConfigs.APPLICATION_NAME = app_name;
-
-        BroadcastReceiver receiver = new BroadcastReceiver() {
-            @Override
-            public void onReceive(Context arg0, Intent arg1) {
-                AppConfigs.V2RAY_STATE = (AppConfigs.V2RAY_STATES) arg1.getExtras().getSerializable("STATE");
-            }
-        };
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            context.registerReceiver(receiver, new IntentFilter("V2RAY_CONNECTION_INFO"), Context.RECEIVER_EXPORTED);
-        } else {
-            context.registerReceiver(receiver, new IntentFilter("V2RAY_CONNECTION_INFO"));
-        }
     }
 
     public static void changeConnectionMode(final AppConfigs.V2RAY_CONNECTION_MODES connection_mode) {
@@ -80,49 +64,27 @@ public class V2rayController {
         AppConfigs.V2RAY_CONFIG = null;
     }
 
-    public static long getConnectedV2rayServerDelay(Context context) {
-        if (V2rayController.getConnectionState() != AppConfigs.V2RAY_STATES.V2RAY_CONNECTED) {
-            return -1;
-        }
+    public static void RequestConnectionStatus(final Context context, final String queryId) {
+        Intent queryIntent = new Intent(context, V2rayVPNService.class);
+        queryIntent.putExtra("COMMAND", AppConfigs.V2RAY_SERVICE_COMMANDS.QUERY_STATUS);
+        queryIntent.putExtra("QUERY_ID", queryId);
+        context.startService(queryIntent);
+    }
+
+    public static void RequestConnectedServerDelay(Context context, String url, String queryId) {
         Intent check_delay;
         if (AppConfigs.V2RAY_CONNECTION_MODE == AppConfigs.V2RAY_CONNECTION_MODES.PROXY_ONLY) {
             check_delay = new Intent(context, V2rayProxyOnlyService.class);
         } else if (AppConfigs.V2RAY_CONNECTION_MODE == AppConfigs.V2RAY_CONNECTION_MODES.VPN_TUN) {
             check_delay = new Intent(context, V2rayVPNService.class);
         } else {
-            return -1;
+            return;
         }
-        final long[] delay = {-1};
-
-        final CountDownLatch latch = new CountDownLatch(1);
+        AppConfigs.DELAY_URL = url;
         check_delay.putExtra("COMMAND", AppConfigs.V2RAY_SERVICE_COMMANDS.MEASURE_DELAY);
+        check_delay.putExtra("QUERY_ID", queryId);
+        check_delay.putExtra("URL", url);
         context.startService(check_delay);
-        BroadcastReceiver receiver = new BroadcastReceiver() {
-            @Override
-            public void onReceive(Context arg0, Intent arg1) {
-                String delayString = arg1.getExtras().getString("DELAY");
-                delay[0] = Long.parseLong(delayString);
-                context.unregisterReceiver(this);
-                latch.countDown();
-            }
-        };
-
-        IntentFilter delayIntentFilter = new IntentFilter("CONNECTED_V2RAY_SERVER_DELAY");
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            context.registerReceiver(receiver, delayIntentFilter, Context.RECEIVER_EXPORTED);
-        }else{
-            context.registerReceiver(receiver, delayIntentFilter);
-        }
-
-        try {
-            boolean received = latch.await(3000, TimeUnit.MILLISECONDS);
-            if (!received) {
-                return -1;
-            }
-        } catch (InterruptedException e) {
-            e.printStackTrace();
-        }
-        return delay[0];
     }
 
     public static long getV2rayServerDelay(final String config, final String url) {

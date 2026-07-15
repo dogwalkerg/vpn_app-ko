@@ -152,9 +152,9 @@ class AuthController extends StateNotifier<AuthState> {
       final res = await _login(username, password, cancelToken: ct);
       if (generation != _authGeneration || ct.isCancelled) return;
       developer.log('login_response_accepted', name: 'vpn_app.auth');
-      await AppSecureStorage.saveToken(res.token);
+      final writeReceipt = await AppSecureStorage.saveToken(res.token);
       if (generation != _authGeneration || ct.isCancelled) {
-        await AppSecureStorage.clearTokenIfMatches(res.token);
+        await AppSecureStorage.clearTokenIfOwned(writeReceipt);
         return;
       }
 
@@ -263,11 +263,27 @@ class AuthController extends StateNotifier<AuthState> {
       if (!silent) state = previousState;
       return false;
     }
+    var remoteLogoutSucceeded = false;
     try {
       await _logout(cancelToken: ct);
+      remoteLogoutSucceeded = true;
     } catch (_) {}
-    await clearLocalSession();
-    return true;
+    try {
+      return await clearLocalSession(
+        requireSecureCleanup: !remoteLogoutSucceeded,
+      );
+    } catch (error, stackTrace) {
+      developer.log(
+        'logout_local_cleanup_failed',
+        name: 'vpn_app.auth',
+        error: error,
+        stackTrace: stackTrace,
+      );
+      if (!silent) {
+        state = const FeatureError<User>('无法安全退出登录，请重试');
+      }
+      return false;
+    }
   }
 
   /// Clears only local authentication state.
@@ -275,9 +291,28 @@ class AuthController extends StateNotifier<AuthState> {
   /// This is used when the backend has already rejected the session. It must
   /// not call the logout endpoint or alter the VPN connection; those actions
   /// belong to the caller so restriction handling cannot recurse.
-  Future<void> clearLocalSession({String? notice}) async {
-    _authGeneration++;
+  Future<bool> clearLocalSession({
+    String? notice,
+    bool requireSecureCleanup = false,
+  }) async {
+    final generation = ++_authGeneration;
     _cancelActive();
+    final previousPhase = ref.read(authSessionPhaseProvider);
+    ref.read(authSessionPhaseProvider.notifier).state =
+        AuthSessionPhase.restoring;
+
+    try {
+      await AppSecureStorage.clearToken(
+        requireSecureCleanup: requireSecureCleanup,
+      );
+    } catch (_) {
+      if (generation == _authGeneration) {
+        ref.read(authSessionPhaseProvider.notifier).state = previousPhase;
+      }
+      rethrow;
+    }
+    if (generation != _authGeneration) return false;
+
     _userCache.clear();
     ref.read(tokenProvider.notifier).state = null;
     ref.read(authSessionPhaseProvider.notifier).state =
@@ -285,7 +320,6 @@ class AuthController extends StateNotifier<AuthState> {
     if (notice != null && notice.trim().isNotEmpty) {
       ref.read(sessionNoticeProvider.notifier).state = notice.trim();
     }
-    await AppSecureStorage.clearToken();
     await ref.read(subscriptionControllerProvider.notifier).clearCache();
 
     ref.invalidate(subscriptionControllerProvider);
@@ -295,6 +329,7 @@ class AuthController extends StateNotifier<AuthState> {
         .cancelPendingSelection(clearNode: true);
 
     state = const FeatureIdle();
+    return true;
   }
 
   Future<void> forgotPassword(String username) async {

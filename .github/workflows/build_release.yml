@@ -6,7 +6,7 @@ on:
       version:
         description: "Release version"
         required: false
-        default: "1.0.35"
+        default: "1.0.37"
       ios_only:
         description: "Only compile the iOS app and Packet Tunnel"
         type: boolean
@@ -25,15 +25,32 @@ env:
   BASE_URL: "https://1api.cnam.ccwu.cc"
 
 jobs:
+  validate-inputs:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+    - name: Validate release inputs
+      env:
+        RELEASE_VERSION: ${{ inputs.version }}
+        IOS_ONLY: ${{ inputs.ios_only }}
+        SIGNED_IOS: ${{ inputs.signed_ios }}
+      run: |
+        bash tool/validate_release_version.sh "${RELEASE_VERSION}"
+        if [[ "${SIGNED_IOS}" == "true" && "${IOS_ONLY}" != "true" ]]; then
+          echo "::error::signed_ios requires ios_only so the workflow has an unambiguous release mode"
+          exit 1
+        fi
+
   analyze:
     if: ${{ !inputs.signed_ios }}
     runs-on: ubuntu-latest
+    needs: validate-inputs
     steps:
     - uses: actions/checkout@v4
     - uses: subosito/flutter-action@v2
       with:
         channel: stable
-        flutter-version: 3.44.x
+        flutter-version: 3.44.6
     - run: flutter pub get
     - run: flutter analyze
     - run: flutter test
@@ -47,7 +64,7 @@ jobs:
     - uses: subosito/flutter-action@v2
       with:
         channel: stable
-        flutter-version: 3.44.x
+        flutter-version: 3.44.6
     - run: flutter pub get
     - name: Restore Android release keystore
       env:
@@ -64,7 +81,7 @@ jobs:
       run: cp build/app/outputs/flutter-apk/app-release.apk "Osca-Android-v${{ inputs.version }}.apk"
     - uses: actions/upload-artifact@v4
       with:
-        name: Osca-Android
+        name: Osca-Android-v${{ inputs.version }}
         path: Osca-Android-v${{ inputs.version }}.apk
         if-no-files-found: error
 
@@ -77,13 +94,26 @@ jobs:
     - uses: subosito/flutter-action@v2
       with:
         channel: stable
-        flutter-version: 3.44.x
+        flutter-version: 3.44.6
     - run: flutter pub get
     - name: Install pinned iOS Xray framework
       run: bash tool/setup_ios_xray.sh
     - name: Install iOS pods
       working-directory: ios
       run: pod install --repo-update
+    - name: Compile iOS Swift package tests and Packet Tunnel
+      run: bash tool/verify_ios_native_build.sh
+    - name: Upload iOS native build diagnostics
+      if: failure()
+      uses: actions/upload-artifact@v4
+      with:
+        name: Osca-iOS-v${{ inputs.version }}-native-diagnostics
+        path: |
+          ${{ runner.temp }}/Osca-iOS-*.log
+          ${{ runner.temp }}/Osca-iOS-*.xcresult
+          ${{ runner.temp }}/Osca-iOS-*-schemes.json
+        if-no-files-found: ignore
+        retention-days: 7
     - run: flutter build ios --release --no-codesign --build-name=${{ inputs.version }} --dart-define=BASE_URL=${{ env.BASE_URL }}
     - name: Verify Packet Tunnel structure
       run: |
@@ -102,12 +132,13 @@ jobs:
         ditto -c -k --sequesterRsrc --keepParent Payload "Osca-iOS-v${{ inputs.version }}-unsigned.ipa"
     - uses: actions/upload-artifact@v4
       with:
-        name: Osca-iOS-unsigned
+        name: Osca-iOS-v${{ inputs.version }}-unsigned
         path: Osca-iOS-v${{ inputs.version }}-unsigned.ipa
         if-no-files-found: error
 
   build-ios-signed:
     if: ${{ inputs.ios_only && inputs.signed_ios }}
+    needs: validate-inputs
     uses: ./.github/workflows/build_ios_release.yml
     with:
       version: ${{ inputs.version }}
@@ -123,7 +154,7 @@ jobs:
     - uses: subosito/flutter-action@v2
       with:
         channel: stable
-        flutter-version: 3.44.x
+        flutter-version: 3.44.6
     - run: flutter pub get
     - run: flutter config --enable-windows-desktop
     - run: flutter build windows --release --build-name=${{ inputs.version }} --dart-define=BASE_URL=${{ env.BASE_URL }}
@@ -135,7 +166,7 @@ jobs:
       run: Compress-Archive -Path build/windows/x64/runner/Release/* -DestinationPath "Osca-Windows-v${{ inputs.version }}.zip" -Force
     - uses: actions/upload-artifact@v4
       with:
-        name: Osca-Windows
+        name: Osca-Windows-v${{ inputs.version }}
         path: Osca-Windows-v${{ inputs.version }}.zip
         if-no-files-found: error
 
@@ -148,42 +179,32 @@ jobs:
     - uses: subosito/flutter-action@v2
       with:
         channel: stable
-        flutter-version: 3.44.x
-    - run: flutter create --platforms=ios,macos .
-    - name: Set macOS deployment target
+        flutter-version: 3.44.6
+    - name: Validate macOS deployment targets
       run: |
-        python3 - <<'PY'
-        from pathlib import Path
-        import re
-        podfile = Path('macos/Podfile')
-        lines = podfile.read_text().splitlines()
-        out = []
-        done = False
-        for line in lines:
-            stripped = line.strip()
-            if stripped.startswith('platform :osx') or stripped.startswith('# platform :osx'):
-                if not done:
-                    out.append("platform :osx, '12.0'")
-                    done = True
-                continue
-            out.append(line)
-        if not done:
-            out.insert(0, "platform :osx, '12.0'")
-        podfile.write_text('\n'.join(out) + '\n')
-        pbx = Path('macos/Runner.xcodeproj/project.pbxproj')
-        text = re.sub(r'MACOSX_DEPLOYMENT_TARGET = [0-9.]+;', 'MACOSX_DEPLOYMENT_TARGET = 12.0;', pbx.read_text())
-        pbx.write_text(text)
-        PY
-        grep -n "platform" macos/Podfile
-        grep -n "MACOSX_DEPLOYMENT_TARGET" macos/Runner.xcodeproj/project.pbxproj || true
+        set -euo pipefail
+        grep -Fqx "platform :osx, '12.0'" macos/Podfile
+        grep -Fqx 'MACOSX_DEPLOYMENT_TARGET = 12.0' macos/Runner/Configs/AppInfo.xcconfig
     - run: flutter pub get
     - run: flutter config --enable-macos-desktop
     - run: flutter build macos --release --build-name=${{ inputs.version }} --dart-define=BASE_URL=${{ env.BASE_URL }}
+    - name: Run macOS RunnerTests
+      run: bash tool/run_macos_runner_tests.sh
+    - name: Upload macOS RunnerTests diagnostics
+      if: failure()
+      uses: actions/upload-artifact@v4
+      with:
+        name: Osca-macOS-v${{ inputs.version }}-test-diagnostics
+        path: |
+          ${{ runner.temp }}/Osca-macOS-RunnerTests.log
+          ${{ runner.temp }}/Osca-macOS-RunnerTests.xcresult
+        if-no-files-found: ignore
+        retention-days: 7
     - name: Package macOS
       run: ditto -c -k --sequesterRsrc --keepParent build/macos/Build/Products/Release/Osca.app "Osca-macOS-v${{ inputs.version }}.zip"
     - uses: actions/upload-artifact@v4
       with:
-        name: Osca-macOS
+        name: Osca-macOS-v${{ inputs.version }}
         path: Osca-macOS-v${{ inputs.version }}.zip
         if-no-files-found: error
 
@@ -203,8 +224,8 @@ jobs:
     - name: Create Release
       uses: softprops/action-gh-release@v2
       with:
-        tag_name: v${{ github.event.inputs.version }}
-        name: Osca v${{ github.event.inputs.version }}
+        tag_name: v${{ inputs.version }}
+        name: Osca v${{ inputs.version }}
         target_commitish: ${{ github.sha }}
         body: "Osca for Android, unsigned iOS, Windows, and macOS."
         files: artifacts/**/*

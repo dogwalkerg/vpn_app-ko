@@ -1,6 +1,7 @@
 ## 1.0.10
 
-* update xray core version to 25.3.6
+* update xray core version to 25.3.31
+* replace BadVPN tun2socks with HEV 2.15.0 built for 16 KB Android pages
 
 ## 1.0.9
 

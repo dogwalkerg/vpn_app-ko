@@ -24,7 +24,9 @@ public class V2rayProxyOnlyService extends Service implements V2rayServicesListe
 
     @Override
     public int onStartCommand(Intent intent, int flags, int startId) {
+        if (intent == null) return START_NOT_STICKY;
         AppConfigs.V2RAY_SERVICE_COMMANDS startCommand = (AppConfigs.V2RAY_SERVICE_COMMANDS) intent.getSerializableExtra("COMMAND");
+        if (startCommand == null) return START_NOT_STICKY;
         if (startCommand.equals(AppConfigs.V2RAY_SERVICE_COMMANDS.START_SERVICE)) {
             V2rayConfig v2rayConfig = (V2rayConfig) intent.getSerializableExtra("V2RAY_CONFIG");
             if (v2rayConfig == null) {
@@ -44,10 +46,16 @@ public class V2rayProxyOnlyService extends Service implements V2rayServicesListe
             AppConfigs.V2RAY_CONFIG = null;
         } else if (startCommand.equals(AppConfigs.V2RAY_SERVICE_COMMANDS.MEASURE_DELAY)) {
             new Thread(() -> {
-                Intent sendB = new Intent("CONNECTED_V2RAY_SERVER_DELAY");
-                sendB.putExtra("DELAY", String.valueOf(V2rayCoreManager.getInstance().getConnectedV2rayServerDelay()));
+                Intent sendB = new Intent(AppConfigs.CONNECTED_SERVER_DELAY_ACTION);
+                sendB.setPackage(getPackageName());
+                AppConfigs.DELAY_URL = intent.getStringExtra("URL");
+                sendB.putExtra("DELAY", V2rayCoreManager.getInstance().getConnectedV2rayServerDelay());
+                sendB.putExtra("QUERY_ID", intent.getStringExtra("QUERY_ID"));
                 sendBroadcast(sendB);
             }, "MEASURE_CONNECTED_V2RAY_SERVER_DELAY").start();
+        } else if (startCommand.equals(AppConfigs.V2RAY_SERVICE_COMMANDS.QUERY_STATUS)) {
+            V2rayCoreManager.getInstance().broadcastConnectionInfo(intent.getStringExtra("QUERY_ID"));
+            if (!V2rayCoreManager.getInstance().isV2rayCoreRunning()) stopSelf();
         } else {
             this.onDestroy();
         }

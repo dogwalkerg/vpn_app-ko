@@ -312,6 +312,30 @@ final forceSubscriptionNodesRefreshProvider =
           .refresh;
     }, name: 'forceSubscriptionNodesRefresh');
 
+typedef PrepareSubscriptionNodesForConnection = Future<void> Function();
+
+final prepareSubscriptionNodesForConnectionProvider =
+    Provider<PrepareSubscriptionNodesForConnection>((ref) {
+      return () async {
+        await ref.read(subscriptionControllerProvider.notifier).fetch();
+        List<SubscriptionNode> nodes;
+        try {
+          nodes = await ref.read(subscriptionNodesProvider.future);
+        } catch (_) {
+          nodes = const [];
+        }
+
+        final refresh = ref.read(
+          subscriptionNodesRefreshControllerProvider.notifier,
+        );
+        if (nodes.isEmpty) {
+          await refresh.refresh();
+        } else {
+          await refresh.refreshNodesIfDue();
+        }
+      };
+    }, name: 'prepareSubscriptionNodesForConnection');
+
 class SubscriptionNodesRefreshController extends StateNotifier<bool> {
   SubscriptionNodesRefreshController(this.ref) : super(false);
 
@@ -412,6 +436,10 @@ SubscriptionNode? _parseNode(String raw) {
   final uri = Uri.tryParse(raw);
   if (uri == null || uri.scheme.isEmpty) return null;
 
+  if (uri.scheme.toLowerCase() == 'vmess') {
+    return _parseVmessNode(raw);
+  }
+
   const supportedSchemes = {'vless', 'trojan', 'ss'};
   if (!supportedSchemes.contains(uri.scheme.toLowerCase()) ||
       uri.host.isEmpty ||
@@ -436,6 +464,37 @@ SubscriptionNode? _parseNode(String raw) {
     load: 0,
     raw: raw,
   );
+}
+
+SubscriptionNode? _parseVmessNode(String raw) {
+  try {
+    final payload = raw.substring(raw.indexOf('://') + 3).trim();
+    final decoded = utf8.decode(base64.decode(base64.normalize(payload)));
+    final value = jsonDecode(decoded);
+    if (value is! Map) return null;
+    final config = value.cast<String, dynamic>();
+    final host = config['add']?.toString().trim() ?? '';
+    final port = int.tryParse(config['port']?.toString() ?? '');
+    if (host.isEmpty || port == null || port <= 0 || port > 65535) {
+      return null;
+    }
+    final configuredName = config['ps']?.toString().trim() ?? '';
+    final name = configuredName.isEmpty ? '$host:$port' : configuredName;
+    final country = _countryFromName(name);
+    return SubscriptionNode(
+      name: name,
+      type: 'VMESS',
+      host: host,
+      port: port,
+      country: country.$1,
+      flag: country.$2,
+      speedMbps: 0,
+      load: 0,
+      raw: raw,
+    );
+  } catch (_) {
+    return null;
+  }
 }
 
 Future<int?> measureNodeLatency(SubscriptionNode node) async {

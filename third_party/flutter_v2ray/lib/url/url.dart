@@ -4,7 +4,18 @@ abstract class V2RayURL {
   V2RayURL({required this.url});
   final String url;
 
-  bool get allowInsecure => true;
+  bool get allowInsecure {
+    final parameters = Uri.tryParse(url)?.queryParameters;
+    if (parameters == null) return false;
+    final value = parameters['allowInsecure'] ??
+        parameters['allow_insecure'] ??
+        parameters['insecure'];
+    return switch (value?.trim().toLowerCase()) {
+      '1' || 'true' || 'yes' => true,
+      _ => false,
+    };
+  }
+
   String get security => "auto";
   int get level => 8;
   int get port => 443;

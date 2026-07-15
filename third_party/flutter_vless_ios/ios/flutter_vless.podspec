@@ -13,7 +13,10 @@ Flutter plugin to run VLESS/VMESS as a local proxy and VPN on iOS with XRay core
   s.license          = { :file => '../LICENSE' }
   s.author           = { '13FOX Studio' => '13fox.comp@gmail.com' }
   s.source           = { :path => '.' }
-  s.source_files = 'flutter_vless/Sources/flutter_vless/**/*.swift'
+  s.source_files = [
+    'flutter_vless/Sources/flutter_vless/**/*.swift',
+    'flutter_vless/Sources/flutter_vless_tunnel_support/**/*.swift'
+  ]
   s.dependency 'Flutter'
   s.platform = :ios, '15.0'
 

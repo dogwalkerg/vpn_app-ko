@@ -2,6 +2,9 @@ package com.github.blueboytm.flutter_v2ray.v2ray.utils;
 
 public class AppConfigs {
 
+    public static final String CONNECTION_INFO_ACTION = "com.github.blueboytm.flutter_v2ray.CONNECTION_INFO";
+    public static final String CONNECTED_SERVER_DELAY_ACTION = "com.github.blueboytm.flutter_v2ray.CONNECTED_SERVER_DELAY";
+
     public static V2RAY_CONNECTION_MODES V2RAY_CONNECTION_MODE = V2RAY_CONNECTION_MODES.VPN_TUN;
     public static String APPLICATION_NAME;
     public static int APPLICATION_ICON;
@@ -14,7 +17,8 @@ public class AppConfigs {
     public enum V2RAY_SERVICE_COMMANDS {
         START_SERVICE,
         STOP_SERVICE,
-        MEASURE_DELAY
+        MEASURE_DELAY,
+        QUERY_STATUS
     }
 
     public enum V2RAY_STATES {

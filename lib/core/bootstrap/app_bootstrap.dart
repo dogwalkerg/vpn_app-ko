@@ -6,7 +6,9 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:vpn_app/core/providers/provider_observer.dart';
+import 'package:vpn_app/core/storage/secure_storage.dart';
 import 'package:vpn_app/core/storage/shared_preferences_provider.dart';
+import 'package:vpn_app/features/auth/providers/auth_providers.dart';
 import 'package:window_manager/window_manager.dart';
 
 import '../monitoring/error_reporter.dart';
@@ -21,6 +23,13 @@ class AppBootstrap {
   static Future<void> run() async {
     WidgetsFlutterBinding.ensureInitialized();
     final sharedPreferences = await SharedPreferences.getInstance();
+    final localAuthSession = AppSecureStorage.readLocalSession(
+      sharedPreferences,
+    );
+    final initialSessionPhase = initialAuthSessionPhase(
+      localStoreInitialized: localAuthSession.initialized,
+      token: localAuthSession.token,
+    );
 
     // Desktop окно/трей
     if (Platform.isWindows || Platform.isLinux || Platform.isMacOS) {
@@ -42,6 +51,8 @@ class AppBootstrap {
       ProviderScope(
         overrides: [
           sharedPreferencesProvider.overrideWithValue(sharedPreferences),
+          tokenProvider.overrideWith((ref) => localAuthSession.token),
+          authSessionPhaseProvider.overrideWith((ref) => initialSessionPhase),
         ],
         observers: [AppProviderObserver()],
         child: _Bootstrap(child: const _MyApp()),

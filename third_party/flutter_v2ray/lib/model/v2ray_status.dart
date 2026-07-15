@@ -6,6 +6,8 @@ class V2RayStatus {
   final int download;
   final String state;
   final String error;
+  final String sessionId;
+  final int generation;
 
   V2RayStatus({
     this.duration = "00:00:00",
@@ -15,5 +17,7 @@ class V2RayStatus {
     this.download = 0,
     this.state = "DISCONNECTED",
     this.error = "",
+    this.sessionId = "",
+    this.generation = 0,
   });
 }

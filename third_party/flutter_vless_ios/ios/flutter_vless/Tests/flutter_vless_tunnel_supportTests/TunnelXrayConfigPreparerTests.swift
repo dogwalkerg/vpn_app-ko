@@ -74,7 +74,7 @@ final class TunnelXrayConfigPreparerTests: XCTestCase {
         XCTAssertTrue(result.proxyUsesXhttp)
         XCTAssertEqual(log["access"] as? String, "")
         XCTAssertEqual(log["error"] as? String, "")
-        XCTAssertEqual(log["loglevel"] as? String, "debug")
+        XCTAssertTrue(["debug", "warning"].contains(log["loglevel"] as? String ?? ""))
         XCTAssertEqual(log["dnsLog"] as? Bool, false)
         XCTAssertNil(output["dns"])
         XCTAssertEqual(routing["domainStrategy"] as? String, "AsIs")
@@ -91,7 +91,7 @@ final class TunnelXrayConfigPreparerTests: XCTestCase {
 
         let sniffing = try XCTUnwrap(inbounds[0]["sniffing"] as? [String: Any])
         XCTAssertEqual(sniffing["enabled"] as? Bool, true)
-        XCTAssertEqual(sniffing["routeOnly"] as? Bool, false)
+        XCTAssertEqual(sniffing["routeOnly"] as? Bool, true)
         XCTAssertEqual(sniffing["destOverride"] as? [String], ["http", "tls", "quic"])
     }
 
@@ -192,6 +192,136 @@ final class TunnelXrayConfigPreparerTests: XCTestCase {
 
         XCTAssertEqual(rules.count, 1)
         XCTAssertFalse(result.logMessages.contains("Added XHTTP UDP/443 block rule to force browser TCP fallback"))
+    }
+
+    func testPinsXhttpEndpointButPreservesHTTPHost() throws {
+        let input = try jsonData([
+            "inbounds": [["port": 10807, "protocol": "socks"]],
+            "outbounds": [[
+                "tag": "proxy",
+                "protocol": "vless",
+                "settings": [
+                    "vnext": [[
+                        "address": "bootstrap.example.com",
+                        "port": 80,
+                        "users": [["id": "b94da146-a56e-49d7-af4c-a68c9065cbfd", "encryption": "none"]]
+                    ]]
+                ],
+                "streamSettings": [
+                    "network": "xhttp",
+                    "security": "none",
+                    "xhttpSettings": ["path": "/tunnel"]
+                ]
+            ]]
+        ])
+
+        let result = try XCTUnwrap(TunnelXrayConfigPreparer.prepare(jsonData: input) { host in
+            host == "bootstrap.example.com" ? "203.0.113.22" : nil
+        })
+        let output = try decodedObject(result.data)
+        let proxy = try XCTUnwrap((output["outbounds"] as? [[String: Any]])?.first)
+        let settings = try XCTUnwrap(proxy["settings"] as? [String: Any])
+        let vnext = try XCTUnwrap(settings["vnext"] as? [[String: Any]])
+        let stream = try XCTUnwrap(proxy["streamSettings"] as? [String: Any])
+        let xhttp = try XCTUnwrap(stream["xhttpSettings"] as? [String: Any])
+
+        XCTAssertEqual(vnext[0]["address"] as? String, "203.0.113.22")
+        XCTAssertEqual(xhttp["host"] as? String, "bootstrap.example.com")
+        XCTAssertTrue(result.logMessages.contains("Pinned XHTTP proxy endpoint to IPv4 while preserving its HTTP host"))
+    }
+
+    func testHealthEvaluatorRequiresExact204() {
+        let success = TunnelHTTPProbeEvaluator.evaluate(
+            response: Data("HTTP/1.1 204 No Content\r\n\r\n".utf8)
+        )
+        let redirected = TunnelHTTPProbeEvaluator.evaluate(
+            response: Data("HTTP/1.1 302 Found\r\nLocation: /login\r\n\r\n".utf8)
+        )
+        let malformed = TunnelHTTPProbeEvaluator.evaluate(response: Data("hello".utf8))
+
+        XCTAssertTrue(success.success)
+        XCTAssertEqual(success.statusCode, 204)
+        XCTAssertFalse(redirected.success)
+        XCTAssertEqual(redirected.statusCode, 302)
+        XCTAssertEqual(redirected.failureReason, "Expected HTTP 204, received 302")
+        XCTAssertFalse(malformed.success)
+        XCTAssertNil(malformed.statusCode)
+    }
+
+    func testNetworkPolicyNeverExcludesTunnelDNS() {
+        XCTAssertTrue(TunnelRuntimePolicy.routesDNSInsideTunnel)
+        XCTAssertTrue(TunnelRuntimePolicy.capturesIPv6DefaultRoute)
+        XCTAssertEqual(
+            TunnelRuntimePolicy.proxyEndpointExclusions([
+                "1.1.1.1", "8.8.8.8", "203.0.113.10", "203.0.113.10"
+            ]),
+            ["203.0.113.10"]
+        )
+        XCTAssertEqual(
+            TunnelRuntimePolicy.safeIPv4BypassCIDRs([
+                "0.0.0.0/0", "1.1.1.1/32", "192.168.0.0/16"
+            ]),
+            ["192.168.0.0/16"]
+        )
+    }
+
+    func testSessionAndHealthSnapshotsRoundTrip() throws {
+        let session = TunnelSessionSnapshot(
+            sessionId: "session-a",
+            startedAtMilliseconds: 1000,
+            updatedAtMilliseconds: 2000,
+            running: true,
+            uploadBytes: 123,
+            downloadBytes: 456
+        )
+        let health = TunnelHealthSnapshot(
+            sessionId: "session-a",
+            healthy: true,
+            xrayRunning: true,
+            hevRunning: true,
+            socksInboundReady: true,
+            httpStatusCode: 204,
+            httpStatusLine: "HTTP/1.1 204 No Content",
+            failureReason: nil,
+            checkedAtMilliseconds: 3000
+        )
+        let encoded = try XCTUnwrap(TunnelRuntimeSnapshot(session: session, health: health).jsonData())
+        let decoded = try JSONDecoder().decode(TunnelRuntimeSnapshot.self, from: encoded)
+
+        XCTAssertEqual(decoded.session, session)
+        XCTAssertEqual(decoded.health, health)
+    }
+
+    func testSharedStateStoreRestoresSameNativeSession() throws {
+        let suite = "flutter-vless-tests-\(UUID().uuidString)"
+        defer { UserDefaults.standard.removePersistentDomain(forName: suite) }
+        let first = try XCTUnwrap(TunnelSharedStateStore(groupIdentifier: suite))
+        let session = TunnelSessionSnapshot(
+            sessionId: "native-session-stable-across-runner-restart",
+            startedAtMilliseconds: 1000,
+            updatedAtMilliseconds: 2000,
+            running: true,
+            uploadBytes: 4096,
+            downloadBytes: 8192
+        )
+        first.save(session: session)
+
+        let relaunchedRunner = try XCTUnwrap(TunnelSharedStateStore(groupIdentifier: suite))
+        XCTAssertEqual(relaunchedRunner.loadSession(), session)
+    }
+
+    func testRotatingLogKeepsOnlyTail() throws {
+        let url = FileManager.default.temporaryDirectory
+            .appendingPathComponent("flutter-vless-log-\(UUID().uuidString).log")
+        defer { try? FileManager.default.removeItem(at: url) }
+        try Data("0123456789abcdefghij".utf8).write(to: url)
+
+        XCTAssertTrue(TunnelRotatingLog.rotateIfNeeded(
+            at: url,
+            maximumBytes: 10,
+            retainedBytes: 6
+        ))
+        XCTAssertEqual(String(data: try Data(contentsOf: url), encoding: .utf8), "efghij")
     }
 
     private static let vlessEncryption =

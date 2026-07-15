@@ -15,11 +15,33 @@ private let pluginLog = Logger(
     category: "FlutterVlessPlugin"
 )
 
+#if DEBUG
+private let routineLogInterval: TimeInterval = 5
+private let healthDiagnosticInterval: TimeInterval = 15
+private let shouldMirrorProviderDebugSnapshots = true
+#else
+private let routineLogInterval: TimeInterval = 60
+private let healthDiagnosticInterval: TimeInterval = 60
+private let shouldMirrorProviderDebugSnapshots = false
+#endif
+
 private final class PluginXRayLogger: NSObject, XRayLoggerProtocol {
     func logInput(_ s: String?) {
         if let message = s {
             pluginLog.info("XRay delay probe: \(message, privacy: .public)")
         }
+    }
+}
+
+private final class NoRedirectURLSessionDelegate: NSObject, URLSessionTaskDelegate {
+    func urlSession(
+        _ session: URLSession,
+        task: URLSessionTask,
+        willPerformHTTPRedirection response: HTTPURLResponse,
+        newRequest request: URLRequest,
+        completionHandler: @escaping (URLRequest?) -> Void
+    ) {
+        completionHandler(nil)
     }
 }
 
@@ -269,6 +291,11 @@ public class FlutterVlessPlugin: NSObject, FlutterPlugin, FlutterStreamHandler {
     private var downloadSpeed: Int = 0
     private var lastTrafficLogDate: Date = .distantPast
     private var lastProviderDebugLogDate: Date = .distantPast
+    private var lastHealthLogDate: Date = .distantPast
+    private var trafficPollInFlight = false
+    private var healthPollInFlight = false
+    private var currentSessionId: String?
+    private var stopPreparationInFlight = false
     private var pendingStopResults: [FlutterResult] = []
     private var stopTimeoutWorkItem: DispatchWorkItem?
 
@@ -337,31 +364,125 @@ public class FlutterVlessPlugin: NSObject, FlutterPlugin, FlutterStreamHandler {
                 return
             }
 
-            Task{
-                do{
-                    let response =  try await self.packetTunnelManager?.sendProviderMessage(data: "xray_traffic".data(using: .utf8)!)
-                    if response != nil{
-                        let traffic = String(decoding: response!, as: UTF8.self)
-                        let parts = traffic.split(separator: ",")
-                        if parts.count >= 2, let up = Int(parts[0]), let down = Int(parts[1]) {
-                            self.uploadSpeed = up - self.totalUpload
-                            self.downloadSpeed = down - self.totalDownload
-                            self.totalUpload = up
-                            self.totalDownload = down
-                            if Date().timeIntervalSince(self.lastTrafficLogDate) >= 5 {
-                                self.lastTrafficLogDate = Date()
-                                pluginLog.info("Traffic stats up=\(up, privacy: .public) down=\(down, privacy: .public) upSpeed=\(self.uploadSpeed, privacy: .public) downSpeed=\(self.downloadSpeed, privacy: .public)")
-                                self.logProviderDebugSnapshot()
-                            }
-                        }
-                    }
-                }catch{
-                    pluginLog.error("Error polling traffic: \(error.localizedDescription, privacy: .public)")
-                }
+            self.pollTunnelRuntime()
+            if Date().timeIntervalSince(self.lastHealthLogDate) >= healthDiagnosticInterval {
+                self.pollTunnelHealthForDiagnostics()
             }
         })
         self.timer = timer
         RunLoop.main.add(timer, forMode: .common)
+    }
+
+    private func pollTunnelRuntime() {
+        guard !trafficPollInFlight else { return }
+        trafficPollInFlight = true
+        Task { [weak self] in
+            guard let self else { return }
+            defer {
+                DispatchQueue.main.async { [weak self] in
+                    self?.trafficPollInFlight = false
+                }
+            }
+            do {
+                guard let response = try await self.packetTunnelManager?.sendProviderMessage(
+                    data: Data("xray_traffic".utf8)
+                ) else { return }
+                await MainActor.run {
+                    self.applyRuntimeSnapshot(response, reason: "traffic-poll")
+                }
+            } catch {
+                pluginLog.error("Error polling traffic: \(error.localizedDescription, privacy: .public)")
+            }
+        }
+    }
+
+    private func applyRuntimeSnapshot(
+        _ data: Data,
+        reason: String,
+        emitEvent: Bool = true
+    ) {
+        guard let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let session = root["session"] as? [String: Any],
+              let sessionId = session["sessionId"] as? String,
+              !sessionId.isEmpty else {
+            pluginLog.error("Ignoring malformed tunnel runtime snapshot")
+            return
+        }
+        let up = Self.integer(session["uploadBytes"])
+        let down = Self.integer(session["downloadBytes"])
+        if currentSessionId != sessionId {
+            currentSessionId = sessionId
+            uploadSpeed = 0
+            downloadSpeed = 0
+        } else {
+            uploadSpeed = max(0, up - totalUpload)
+            downloadSpeed = max(0, down - totalDownload)
+        }
+        totalUpload = up
+        totalDownload = down
+        let now = Date()
+        if now.timeIntervalSince(lastTrafficLogDate) >= routineLogInterval {
+            lastTrafficLogDate = now
+            pluginLog.info("Traffic session=\(sessionId, privacy: .public) up=\(up, privacy: .public) down=\(down, privacy: .public) upSpeed=\(self.uploadSpeed, privacy: .public) downSpeed=\(self.downloadSpeed, privacy: .public)")
+            if shouldMirrorProviderDebugSnapshots {
+                logProviderDebugSnapshot()
+            }
+        }
+        if emitEvent {
+            emitStatus(
+                duration: currentDurationSeconds(),
+                state: currentRuntimeState(),
+                reason: reason
+            )
+        }
+    }
+
+    private func pollTunnelHealthForDiagnostics() {
+        guard !healthPollInFlight else { return }
+        healthPollInFlight = true
+        Task { [weak self] in
+            guard let self else { return }
+            defer {
+                DispatchQueue.main.async { [weak self] in
+                    self?.healthPollInFlight = false
+                }
+            }
+            do {
+                guard let response = try await self.packetTunnelManager?.sendProviderMessage(
+                    data: Data("xray_health".utf8)
+                ) else { return }
+                guard let health = try? JSONSerialization.jsonObject(with: response) as? [String: Any] else {
+                    pluginLog.error("Provider returned malformed health data")
+                    return
+                }
+                await MainActor.run {
+                    self.lastHealthLogDate = Date()
+                }
+                let healthy = health["healthy"] as? Bool ?? false
+                let status = Self.integer(health["httpStatusCode"])
+                let reason = health["failureReason"] as? String ?? "unknown"
+                if healthy && status == TunnelRuntimePolicy.healthProbeExpectedStatus {
+                    pluginLog.info("Tunnel health exact HTTP \(status, privacy: .public)")
+                } else {
+                    pluginLog.error("Tunnel health failed status=\(status, privacy: .public) reason=\(reason, privacy: .public)")
+                }
+            } catch {
+                pluginLog.error("Provider health poll failed: \(error.localizedDescription, privacy: .public)")
+            }
+        }
+    }
+
+    private func restoreRuntimeSnapshotFromAppGroup() {
+        guard let snapshot = packetTunnelManager?.sharedRuntimeSnapshot(),
+              let data = snapshot.jsonData() else { return }
+        applyRuntimeSnapshot(data, reason: "app-group-restore")
+    }
+
+    private static func integer(_ value: Any?) -> Int {
+        if let value = value as? Int { return max(0, value) }
+        if let value = value as? NSNumber { return max(0, value.intValue) }
+        if let value = value as? String { return max(0, Int(value) ?? 0) }
+        return 0
     }
 
     private func stopTimer(reason: String = "unspecified") {
@@ -380,6 +501,8 @@ public class FlutterVlessPlugin: NSObject, FlutterPlugin, FlutterStreamHandler {
         self.downloadSpeed = 0
         self.totalUpload = 0
         self.totalDownload = 0
+        self.trafficPollInFlight = false
+        self.healthPollInFlight = false
         self.lastProviderDebugLogDate = .distantPast
     }
 
@@ -412,9 +535,17 @@ public class FlutterVlessPlugin: NSObject, FlutterPlugin, FlutterStreamHandler {
     }
 
     private func emitStatus(duration: Int, state: String, reason: String) {
-        let payload = ["\(duration)", "\(uploadSpeed)", "\(downloadSpeed)", "\(totalUpload)", "\(totalDownload)", state]
-        if state != "CONNECTED" || Date().timeIntervalSince(lastTrafficLogDate) >= 5 {
-            pluginLog.info("Status event reason=\(reason, privacy: .public) payload=\(payload.joined(separator: ","), privacy: .public) vpnStatus=\(self.packetTunnelManager?.status?.rawValue ?? -1, privacy: .public)")
+        let payload: [String: Any] = [
+            "duration": duration,
+            "uploadSpeed": uploadSpeed,
+            "downloadSpeed": downloadSpeed,
+            "upload": totalUpload,
+            "download": totalDownload,
+            "state": state,
+            "sessionId": currentSessionId ?? ""
+        ]
+        if state != "CONNECTED" || Date().timeIntervalSince(lastTrafficLogDate) >= routineLogInterval {
+            pluginLog.info("Status event reason=\(reason, privacy: .public) state=\(state, privacy: .public) session=\(self.currentSessionId ?? "", privacy: .public) vpnStatus=\(self.packetTunnelManager?.status?.rawValue ?? -1, privacy: .public)")
         }
         eventSink?(payload)
     }
@@ -464,6 +595,10 @@ public class FlutterVlessPlugin: NSObject, FlutterPlugin, FlutterStreamHandler {
             getServerDelay(call: call, result: result)
         case "getProviderDebugSnapshot":
             getProviderDebugSnapshot(result: result)
+        case "getTunnelHealth":
+            getTunnelHealth(result: result)
+        case "getTunnelSnapshot":
+            getTunnelSnapshot(result: result)
         default:
             result(FlutterMethodNotImplemented)
         }
@@ -490,9 +625,57 @@ public class FlutterVlessPlugin: NSObject, FlutterPlugin, FlutterStreamHandler {
         default:
             pendingStopResults.append(result)
             scheduleStopTimeout()
-            startTimer(reason: "stopVless-disconnecting")
             emitStatus(duration: currentDurationSeconds(), state: "DISCONNECTING", reason: "stopVless")
+            prepareFinalTrafficSnapshotAndStop(manager: manager)
+        }
+    }
+
+    private func prepareFinalTrafficSnapshotAndStop(manager: PacketTunnelManager) {
+        guard !stopPreparationInFlight else { return }
+        stopPreparationInFlight = true
+        let fallback = DispatchWorkItem { [weak self, weak manager] in
+            guard let self, self.stopPreparationInFlight, let manager else { return }
+            pluginLog.warning("Final traffic snapshot timed out; stopping Packet Tunnel")
+            self.stopPreparationInFlight = false
+            self.startTimer(reason: "stopVless-final-snapshot-timeout")
             manager.stop()
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.75, execute: fallback)
+        Task { [weak self] in
+            guard let self else { return }
+            do {
+                if let response = try await manager.sendProviderMessage(
+                    data: Data("xray_traffic".utf8)
+                ) {
+                    await MainActor.run {
+                        guard self.stopPreparationInFlight,
+                              let status = manager.status,
+                              status != .disconnected,
+                              status != .invalid else {
+                            return
+                        }
+                        self.applyRuntimeSnapshot(
+                            response,
+                            reason: "pre-stop-final-traffic",
+                            emitEvent: false
+                        )
+                        self.emitStatus(
+                            duration: self.currentDurationSeconds(),
+                            state: "DISCONNECTING",
+                            reason: "pre-stop-final-traffic"
+                        )
+                    }
+                }
+            } catch {
+                pluginLog.error("Final tunnel traffic snapshot failed: \(error.localizedDescription, privacy: .public)")
+            }
+            await MainActor.run {
+                guard self.stopPreparationInFlight else { return }
+                fallback.cancel()
+                self.stopPreparationInFlight = false
+                self.startTimer(reason: "stopVless-disconnecting")
+                manager.stop()
+            }
         }
     }
 
@@ -570,6 +753,152 @@ public class FlutterVlessPlugin: NSObject, FlutterPlugin, FlutterStreamHandler {
         }
     }
 
+    private func getTunnelHealth(result: @escaping FlutterResult) {
+        guard currentRuntimeState() == "CONNECTED" else {
+            result([
+                "sessionId": currentSessionId ?? "",
+                "healthy": false,
+                "xrayRunning": false,
+                "hevRunning": false,
+                "socksInboundReady": false,
+                "httpStatusCode": NSNull(),
+                "httpStatusLine": "",
+                "failureReason": "Packet Tunnel is not connected",
+                "checkedAtMilliseconds": Int64(Date().timeIntervalSince1970 * 1000)
+            ])
+            return
+        }
+        Task {
+            do {
+                guard let response = try await packetTunnelManager?.sendProviderMessage(
+                    data: Data("xray_health".utf8)
+                ), var payload = try? JSONSerialization.jsonObject(with: response) as? [String: Any] else {
+                    result(FlutterError(
+                        code: "TUNNEL_HEALTH_UNAVAILABLE",
+                        message: "Packet Tunnel returned no valid health result.",
+                        details: nil
+                    ))
+                    return
+                }
+                let providerHealthy = payload["healthy"] as? Bool ?? false
+                let providerStatus = Self.integer(payload["httpStatusCode"])
+                let systemProbe = await self.probeSystemPacketTunnel()
+                payload["providerHttpStatusCode"] = providerStatus
+                if let statusCode = systemProbe.statusCode {
+                    payload["httpStatusCode"] = statusCode
+                } else {
+                    payload["httpStatusCode"] = NSNull()
+                }
+                payload["httpStatusLine"] = systemProbe.statusLine
+                payload["healthy"] = providerHealthy && systemProbe.statusCode == 204
+                if !(payload["healthy"] as? Bool ?? false) {
+                    let providerReason = payload["failureReason"] as? String
+                    payload["failureReason"] = systemProbe.failureReason ??
+                        providerReason ??
+                        "Packet Tunnel health check failed"
+                }
+                result(payload)
+            } catch {
+                result(FlutterError(
+                    code: "TUNNEL_HEALTH_FAILED",
+                    message: error.localizedDescription,
+                    details: nil
+                ))
+            }
+        }
+    }
+
+    private func probeSystemPacketTunnel() async -> (
+        statusCode: Int?,
+        statusLine: String,
+        failureReason: String?
+    ) {
+        guard let url = URL(string: "https://www.gstatic.com/generate_204") else {
+            return (nil, "", "Invalid system tunnel probe URL")
+        }
+        var request = URLRequest(url: url)
+        request.httpMethod = "GET"
+        request.cachePolicy = .reloadIgnoringLocalAndRemoteCacheData
+        request.timeoutInterval = 6
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.timeoutIntervalForRequest = 6
+        configuration.timeoutIntervalForResource = 6
+        configuration.requestCachePolicy = .reloadIgnoringLocalAndRemoteCacheData
+        let delegate = NoRedirectURLSessionDelegate()
+        let session = URLSession(
+            configuration: configuration,
+            delegate: delegate,
+            delegateQueue: nil
+        )
+        defer { session.invalidateAndCancel() }
+        do {
+            let (_, response) = try await session.data(for: request)
+            guard let http = response as? HTTPURLResponse else {
+                return (nil, "", "System tunnel probe returned a non-HTTP response")
+            }
+            let statusLine = "HTTP \(http.statusCode)"
+            guard http.statusCode == 204 else {
+                return (
+                    http.statusCode,
+                    statusLine,
+                    "System Packet Tunnel expected HTTP 204, received \(http.statusCode)"
+                )
+            }
+            return (http.statusCode, statusLine, nil)
+        } catch {
+            return (nil, "", "System Packet Tunnel probe failed: \(error.localizedDescription)")
+        }
+    }
+
+    private func getTunnelSnapshot(result: @escaping FlutterResult) {
+        let state = currentRuntimeState()
+        guard state == "CONNECTED" else {
+            result(runtimeSnapshotPayload(
+                packetTunnelManager?.sharedRuntimeSnapshot(),
+                state: state
+            ))
+            return
+        }
+        Task {
+            do {
+                let response = try await packetTunnelManager?.sendProviderMessage(
+                    data: Data("xray_snapshot".utf8)
+                )
+                let snapshot = response.flatMap {
+                    try? JSONDecoder().decode(TunnelRuntimeSnapshot.self, from: $0)
+                } ?? packetTunnelManager?.sharedRuntimeSnapshot()
+                result(runtimeSnapshotPayload(snapshot, state: currentRuntimeState()))
+            } catch {
+                result(runtimeSnapshotPayload(
+                    packetTunnelManager?.sharedRuntimeSnapshot(),
+                    state: currentRuntimeState()
+                ))
+            }
+        }
+    }
+
+    private func runtimeSnapshotPayload(
+        _ snapshot: TunnelRuntimeSnapshot?,
+        state: String
+    ) -> [String: Any] {
+        var payload: [String: Any] = [
+            "state": state,
+            "vpnStatus": packetTunnelManager?.status?.rawValue ?? -1,
+            "enabled": packetTunnelManager?.isEnabled ?? false
+        ]
+        if let session = snapshot?.session,
+           let data = session.jsonData(),
+           let value = try? JSONSerialization.jsonObject(with: data) {
+            payload["session"] = value
+        }
+        if let health = snapshot?.health,
+           let data = health.jsonData(),
+           let value = try? JSONSerialization.jsonObject(with: data) {
+            payload["health"] = value
+        }
+        return payload
+    }
+
     private func getServerDelay(call: FlutterMethodCall, result: @escaping FlutterResult) {
         guard let arguments = call.arguments as? [String: Any],
               let url = arguments["url"] as? String,
@@ -608,6 +937,11 @@ public class FlutterVlessPlugin: NSObject, FlutterPlugin, FlutterStreamHandler {
         }
 
         proxyOnlyRunner.stop()
+        currentSessionId = nil
+        totalUpload = 0
+        totalDownload = 0
+        uploadSpeed = 0
+        downloadSpeed = 0
         packetTunnelManager?.remark = remark
         packetTunnelManager?.xrayConfig = configData
         packetTunnelManager?.bypassSubnets = arguments["bypass_subnets"] as? [String] ?? []
@@ -662,7 +996,13 @@ public class FlutterVlessPlugin: NSObject, FlutterPlugin, FlutterStreamHandler {
         manager.statusDidChange = { [weak self] status in
             guard let self else { return }
             switch status {
-            case .connecting, .connected, .reasserting, .disconnecting:
+            case .connected, .reasserting:
+                // The extension writes the new session before reporting
+                // connected. Restore it synchronously so the first CONNECTED
+                // event never carries a stale ID from the previous tunnel.
+                self.restoreRuntimeSnapshotFromAppGroup()
+                self.startTimer(reason: "vpn-status-\(status?.rawValue ?? -1)")
+            case .connecting, .disconnecting:
                 self.startTimer(reason: "vpn-status-\(status?.rawValue ?? -1)")
             case .disconnected, .invalid:
                 if !self.proxyOnlyRunner.isRunning {
@@ -676,6 +1016,7 @@ public class FlutterVlessPlugin: NSObject, FlutterPlugin, FlutterStreamHandler {
         Task {
             await manager.initialize()
             await MainActor.run {
+                self.restoreRuntimeSnapshotFromAppGroup()
                 if manager.connectedDate != nil {
                     self.startTimer(reason: "initialize-existing-connected-date")
                 }
@@ -734,6 +1075,18 @@ final class PacketTunnelManager: ObservableObject {
 
     var connectedDate: Date? {
         manager.flatMap { $0.connection.connectedDate }
+    }
+
+    var isEnabled: Bool {
+        manager?.isEnabled ?? false
+    }
+
+    func sharedRuntimeSnapshot() -> TunnelRuntimeSnapshot? {
+        guard let groupIdentifier,
+              let store = TunnelSharedStateStore(groupIdentifier: groupIdentifier) else {
+            return nil
+        }
+        return store.snapshot()
     }
 
     init(providerBundleIdentifier: String, groupIdentifier: String) {
@@ -796,7 +1149,8 @@ final class PacketTunnelManager: ObservableObject {
                 configuration.providerConfiguration = [
                     "xrayConfig": self.xrayConfig,
                     "bypassSubnets": self.bypassSubnets,
-                    "proxyOnly": self.proxyOnly
+                    "proxyOnly": self.proxyOnly,
+                    "groupIdentifier": self.groupIdentifier ?? ""
                 ]
                 if #available(iOS 14.2, *) {
                     configuration.excludeLocalNetworks = true

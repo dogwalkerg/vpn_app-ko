@@ -6,7 +6,7 @@ on:
       version:
         description: Release version
         required: true
-        default: 1.0.35
+        default: 1.0.37
       publish_release:
         description: Publish the signed IPA to GitHub Releases
         type: boolean
@@ -48,10 +48,15 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Validate release version
+        env:
+          RELEASE_VERSION: ${{ inputs.version }}
+        run: bash tool/validate_release_version.sh "${RELEASE_VERSION}"
+
       - uses: subosito/flutter-action@v2
         with:
           channel: stable
-          flutter-version: 3.44.x
+          flutter-version: 3.44.6
           cache: true
 
       - name: Resolve Dart dependencies
@@ -68,6 +73,21 @@ jobs:
       - name: Install iOS pods
         working-directory: ios
         run: pod install --repo-update
+
+      - name: Compile iOS Swift package tests and Packet Tunnel
+        run: bash tool/verify_ios_native_build.sh
+
+      - name: Upload iOS native build diagnostics
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: Osca-iOS-v${{ inputs.version }}-native-diagnostics
+          path: |
+            ${{ runner.temp }}/Osca-iOS-*.log
+            ${{ runner.temp }}/Osca-iOS-*.xcresult
+            ${{ runner.temp }}/Osca-iOS-*-schemes.json
+          if-no-files-found: ignore
+          retention-days: 7
 
       - name: Compile app and Packet Tunnel without signing
         run: >-
@@ -97,7 +117,7 @@ jobs:
 
       - uses: actions/upload-artifact@v4
         with:
-          name: Osca-iOS-unsigned
+          name: Osca-iOS-v${{ inputs.version }}-unsigned
           path: Osca-iOS-v${{ inputs.version }}-unsigned.ipa
           if-no-files-found: error
 
@@ -228,7 +248,7 @@ jobs:
 
       - uses: actions/upload-artifact@v4
         with:
-          name: Osca-iOS-signed
+          name: Osca-iOS-v${{ inputs.version }}-signed
           path: Osca-iOS-v${{ inputs.version }}-signed.ipa
           if-no-files-found: error
 

@@ -306,12 +306,85 @@ void main() {
         () => container.read(authControllerProvider) is FeatureReady<User>,
       );
 
-      await container.read(authControllerProvider.notifier).logout();
+      expect(
+        await container.read(authControllerProvider.notifier).logout(),
+        isTrue,
+      );
 
       expect(events, ['disconnect', 'remote-logout']);
       expect(container.read(authControllerProvider), isA<FeatureIdle<User>>());
       expect(container.read(tokenProvider), isNull);
       expect(await AppSecureStorage.readToken(), isNull);
+    },
+  );
+
+  test(
+    'local cleanup stays behind the restoring gate until persistence finishes',
+    () async {
+      final original = FlutterSecureStoragePlatform.instance;
+      addTearDown(() => FlutterSecureStoragePlatform.instance = original);
+      FlutterSecureStoragePlatform.instance = _HangingWriteSecureStorage();
+      SharedPreferences.setMockInitialValues({
+        'auth_token_store_initialized_v1': true,
+        'auth_token_fallback_v1': 'stored-token',
+      });
+      final authRepository = _StubAuthRepository(user: user);
+      final container = _container(authRepository, disconnect: () async {});
+      addTearDown(container.dispose);
+
+      await _waitUntil(
+        () => container.read(authControllerProvider) is FeatureReady<User>,
+      );
+
+      final cleanup = container
+          .read(authControllerProvider.notifier)
+          .clearLocalSession();
+      await Future<void>.delayed(Duration.zero);
+
+      expect(
+        container.read(authSessionPhaseProvider),
+        AuthSessionPhase.restoring,
+      );
+      expect(container.read(tokenProvider), 'stored-token');
+      expect(await cleanup, isTrue);
+      expect(
+        container.read(authSessionPhaseProvider),
+        AuthSessionPhase.signedOut,
+      );
+      expect(container.read(tokenProvider), isNull);
+    },
+  );
+
+  test(
+    'logout fails closed when backend and secure cleanup both fail',
+    () async {
+      final original = FlutterSecureStoragePlatform.instance;
+      addTearDown(() => FlutterSecureStoragePlatform.instance = original);
+      FlutterSecureStoragePlatform.instance = _UnavailableSecureStorage();
+      SharedPreferences.setMockInitialValues({
+        'auth_session_v2': '{"state":"signed_in","token":"stored-token"}',
+      });
+      final authRepository = _StubAuthRepository(
+        user: user,
+        logoutError: const ApiException('offline'),
+      );
+      final container = _container(authRepository, disconnect: () async {});
+      addTearDown(container.dispose);
+
+      await _waitUntil(
+        () => container.read(authControllerProvider) is FeatureReady<User>,
+      );
+
+      expect(
+        await container.read(authControllerProvider.notifier).logout(),
+        isFalse,
+      );
+      expect(
+        container.read(authSessionPhaseProvider),
+        AuthSessionPhase.signedIn,
+      );
+      expect(container.read(tokenProvider), 'stored-token');
+      expect(container.read(authControllerProvider), isA<FeatureError<User>>());
     },
   );
 }
@@ -370,12 +443,14 @@ class _StubAuthRepository implements AuthRepository {
     this.validationError,
     this.validation,
     this.onLogout,
+    this.logoutError,
   });
 
   final User user;
   final Object? validationError;
   final Completer<User>? validation;
   final void Function()? onLogout;
+  final Object? logoutError;
   int validateCalls = 0;
   int loginCalls = 0;
   int logoutCalls = 0;
@@ -394,6 +469,7 @@ class _StubAuthRepository implements AuthRepository {
   Future<void> logout({CancelToken? cancelToken}) async {
     logoutCalls++;
     onLogout?.call();
+    if (logoutError case final error?) throw error;
   }
 
   @override
@@ -513,4 +589,41 @@ class _HangingWriteSecureStorage extends FlutterSecureStoragePlatform {
     required String value,
     required Map<String, String> options,
   }) => _never.future;
+}
+
+class _UnavailableSecureStorage extends FlutterSecureStoragePlatform {
+  UnsupportedError _error() => UnsupportedError('secure storage unavailable');
+
+  @override
+  Future<bool> containsKey({
+    required String key,
+    required Map<String, String> options,
+  }) => Future<bool>.error(_error());
+
+  @override
+  Future<void> delete({
+    required String key,
+    required Map<String, String> options,
+  }) => Future<void>.error(_error());
+
+  @override
+  Future<void> deleteAll({required Map<String, String> options}) =>
+      Future<void>.error(_error());
+
+  @override
+  Future<String?> read({
+    required String key,
+    required Map<String, String> options,
+  }) => Future<String?>.error(_error());
+
+  @override
+  Future<Map<String, String>> readAll({required Map<String, String> options}) =>
+      Future<Map<String, String>>.error(_error());
+
+  @override
+  Future<void> write({
+    required String key,
+    required String value,
+    required Map<String, String> options,
+  }) => Future<void>.error(_error());
 }

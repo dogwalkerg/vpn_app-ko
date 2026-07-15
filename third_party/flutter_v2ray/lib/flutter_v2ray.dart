@@ -100,6 +100,11 @@ class FlutterV2ray {
     await FlutterV2rayPlatform.instance.stopV2Ray();
   }
 
+  /// Returns the current state reported by the native VPN service.
+  Future<V2RayStatus> getV2RayStatus() {
+    return FlutterV2rayPlatform.instance.getV2RayStatus();
+  }
+
   /// This method returns the real server delay of the configuration.
   Future<int> getServerDelay(
       {required String config,

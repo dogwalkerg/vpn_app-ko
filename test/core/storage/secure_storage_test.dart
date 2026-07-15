@@ -60,6 +60,94 @@ void main() {
 
     expect(await AppSecureStorage.readToken(), isNull);
   });
+
+  test('a local tombstone wins over a stale fallback token', () async {
+    SharedPreferences.setMockInitialValues({
+      'auth_token_signed_out_v2': true,
+      'auth_token_fallback_v1': 'stale-token',
+    });
+
+    final prefs = await SharedPreferences.getInstance();
+    final snapshot = AppSecureStorage.readLocalSession(prefs);
+
+    expect(snapshot.initialized, isTrue);
+    expect(snapshot.token, isNull);
+    expect(await AppSecureStorage.readToken(), isNull);
+  });
+
+  test('the atomic v2 record wins over stale legacy keys', () async {
+    SharedPreferences.setMockInitialValues({
+      'auth_session_v2': '{"state":"signed_out"}',
+      'auth_token_store_initialized_v1': true,
+      'auth_token_signed_out_v2': false,
+      'auth_token_fallback_v1': 'stale-token',
+    });
+
+    final prefs = await SharedPreferences.getInstance();
+    final snapshot = AppSecureStorage.readLocalSession(prefs);
+
+    expect(snapshot.initialized, isTrue);
+    expect(snapshot.token, isNull);
+  });
+
+  test(
+    'a secure tombstone blocks legacy migration after prefs reset',
+    () async {
+      final original = FlutterSecureStoragePlatform.instance;
+      addTearDown(() => FlutterSecureStoragePlatform.instance = original);
+      FlutterSecureStoragePlatform.instance = _MemorySecureStorage({
+        'token': 'legacy-token',
+        'auth_session_state_v2': 'signed_out',
+      });
+      SharedPreferences.setMockInitialValues({});
+
+      expect(await AppSecureStorage.readToken(), isNull);
+
+      final prefs = await SharedPreferences.getInstance();
+      expect(prefs.getBool('auth_token_store_initialized_v1'), isTrue);
+      expect(prefs.getBool('auth_token_signed_out_v2'), isTrue);
+      expect(prefs.getString('auth_token_fallback_v1'), isNull);
+    },
+  );
+
+  test('a stale same-token write cannot clear a newer session', () async {
+    SharedPreferences.setMockInitialValues({});
+
+    final first = await AppSecureStorage.saveToken('same-token');
+    final second = await AppSecureStorage.saveToken('same-token');
+
+    await AppSecureStorage.clearTokenIfOwned(first);
+    expect(await AppSecureStorage.readToken(), 'same-token');
+
+    await AppSecureStorage.clearTokenIfOwned(second);
+    expect(await AppSecureStorage.readToken(), isNull);
+  });
+
+  test('concurrent local writes commit in request order', () async {
+    SharedPreferences.setMockInitialValues({});
+
+    final first = AppSecureStorage.saveToken('older-token');
+    final second = AppSecureStorage.saveToken('newer-token');
+
+    await Future.wait([first, second]);
+    expect(await AppSecureStorage.readToken(), 'newer-token');
+  });
+
+  test(
+    'reads the cached session synchronously for the first app frame',
+    () async {
+      SharedPreferences.setMockInitialValues({
+        'auth_token_store_initialized_v1': true,
+        'auth_token_fallback_v1': ' cached-token ',
+      });
+
+      final prefs = await SharedPreferences.getInstance();
+      final snapshot = AppSecureStorage.readLocalSession(prefs);
+
+      expect(snapshot.initialized, isTrue);
+      expect(snapshot.token, 'cached-token');
+    },
+  );
 }
 
 class _UnavailableSecureStorage extends FlutterSecureStoragePlatform {

@@ -3,6 +3,8 @@
 
 import 'dart:convert';
 
+import 'package:flutter/services.dart';
+import 'package:flutter_vless/flutter_vless_ios.dart' show IosVlessStatus;
 import 'package:flutter_vless/url/hysteria2.dart';
 import 'package:flutter_vless/url/shadowsocks.dart';
 import 'package:flutter_vless/url/socks.dart';
@@ -14,10 +16,157 @@ import 'package:flutter_vless/url/vmess.dart';
 import 'package:flutter_vless/url/xray_config.dart';
 import 'package:flutter_vless/url/xray_config_model.dart';
 import 'package:flutter_vless/url/xray_config_validator.dart';
-import 'package:flutter_vless_platform_interface/flutter_vless_platform_interface.dart';
+import 'package:flutter_vless_platform_interface/flutter_vless_platform_interface.dart'
+    hide VlessStatus;
+import 'package:flutter_vless_platform_interface/flutter_vless_platform_interface.dart'
+    as platform_status show VlessStatus;
 
-export 'package:flutter_vless_platform_interface/flutter_vless_platform_interface.dart';
+export 'package:flutter_vless_platform_interface/flutter_vless_platform_interface.dart'
+    hide VlessStatus;
 export 'url/url.dart';
+
+/// Runtime status including the persistent native Packet Tunnel session ID.
+class VlessStatus extends platform_status.VlessStatus {
+  final String? sessionId;
+
+  VlessStatus({
+    super.duration,
+    super.uploadSpeed,
+    super.downloadSpeed,
+    super.upload,
+    super.download,
+    super.state,
+    required this.sessionId,
+  });
+
+  factory VlessStatus.fromPlatform(platform_status.VlessStatus status) {
+    return VlessStatus(
+      duration: status.duration,
+      uploadSpeed: status.uploadSpeed,
+      downloadSpeed: status.downloadSpeed,
+      upload: status.upload,
+      download: status.download,
+      state: status.state,
+      sessionId: status is IosVlessStatus ? status.sessionId : null,
+    );
+  }
+}
+
+class IosTunnelHealth {
+  final String? sessionId;
+  final bool healthy;
+  final bool xrayRunning;
+  final bool hevRunning;
+  final bool socksInboundReady;
+  final int? providerHttpStatusCode;
+  final int? httpStatusCode;
+  final String httpStatusLine;
+  final String? failureReason;
+  final DateTime? checkedAt;
+
+  const IosTunnelHealth({
+    required this.sessionId,
+    required this.healthy,
+    required this.xrayRunning,
+    required this.hevRunning,
+    required this.socksInboundReady,
+    required this.providerHttpStatusCode,
+    required this.httpStatusCode,
+    required this.httpStatusLine,
+    required this.failureReason,
+    required this.checkedAt,
+  });
+
+  factory IosTunnelHealth.fromMap(Map<Object?, Object?> map) {
+    final checkedAtMilliseconds = _nativeInt(map['checkedAtMilliseconds']);
+    return IosTunnelHealth(
+      sessionId: _nonEmptyNativeString(map['sessionId']),
+      healthy: map['healthy'] == true,
+      xrayRunning: map['xrayRunning'] == true,
+      hevRunning: map['hevRunning'] == true,
+      socksInboundReady: map['socksInboundReady'] == true,
+      providerHttpStatusCode: map['providerHttpStatusCode'] == null
+          ? null
+          : _nativeInt(map['providerHttpStatusCode']),
+      httpStatusCode: map['httpStatusCode'] == null
+          ? null
+          : _nativeInt(map['httpStatusCode']),
+      httpStatusLine: map['httpStatusLine']?.toString() ?? '',
+      failureReason: _nonEmptyNativeString(map['failureReason']),
+      checkedAt: checkedAtMilliseconds <= 0
+          ? null
+          : DateTime.fromMillisecondsSinceEpoch(checkedAtMilliseconds),
+    );
+  }
+
+  bool get hasExactHttp204 =>
+      healthy && httpStatusCode == 204 && providerHttpStatusCode == 204;
+}
+
+class IosTunnelSnapshot {
+  final String state;
+  final bool enabled;
+  final int vpnStatus;
+  final String? sessionId;
+  final bool running;
+  final int uploadBytes;
+  final int downloadBytes;
+  final DateTime? startedAt;
+  final DateTime? updatedAt;
+  final IosTunnelHealth? health;
+
+  const IosTunnelSnapshot({
+    required this.state,
+    required this.enabled,
+    required this.vpnStatus,
+    required this.sessionId,
+    required this.running,
+    required this.uploadBytes,
+    required this.downloadBytes,
+    required this.startedAt,
+    required this.updatedAt,
+    required this.health,
+  });
+
+  factory IosTunnelSnapshot.fromMap(Map<Object?, Object?> map) {
+    final session = map['session'] is Map
+        ? Map<Object?, Object?>.from(map['session'] as Map)
+        : const <Object?, Object?>{};
+    final healthMap = map['health'] is Map
+        ? Map<Object?, Object?>.from(map['health'] as Map)
+        : null;
+    final startedAt = _nativeInt(session['startedAtMilliseconds']);
+    final updatedAt = _nativeInt(session['updatedAtMilliseconds']);
+    return IosTunnelSnapshot(
+      state: map['state']?.toString() ?? 'UNKNOWN',
+      enabled: map['enabled'] == true,
+      vpnStatus: _nativeInt(map['vpnStatus']),
+      sessionId: _nonEmptyNativeString(session['sessionId']),
+      running: session['running'] == true,
+      uploadBytes: _nativeInt(session['uploadBytes']),
+      downloadBytes: _nativeInt(session['downloadBytes']),
+      startedAt: startedAt <= 0
+          ? null
+          : DateTime.fromMillisecondsSinceEpoch(startedAt),
+      updatedAt: updatedAt <= 0
+          ? null
+          : DateTime.fromMillisecondsSinceEpoch(updatedAt),
+      health: healthMap == null ? null : IosTunnelHealth.fromMap(healthMap),
+    );
+  }
+}
+
+int _nativeInt(Object? value) {
+  if (value is int) return value < 0 ? 0 : value;
+  if (value is num) return value.toInt().clamp(0, 0x7fffffffffffffff);
+  return int.tryParse(value?.toString() ?? '')?.clamp(0, 0x7fffffffffffffff) ??
+      0;
+}
+
+String? _nonEmptyNativeString(Object? value) {
+  final text = value?.toString().trim() ?? '';
+  return text.isEmpty ? null : text;
+}
 
 /// App-facing controller for Xray/V2Ray proxy and VPN tunnel sessions.
 ///
@@ -38,6 +187,7 @@ class FlutterVless {
   FlutterVless({required this.onStatusChanged});
 
   static const XrayConfigValidator _configValidator = XrayConfigValidator();
+  static const MethodChannel _nativeChannel = MethodChannel('flutter_vless');
 
   /// Called whenever the active platform backend emits a new runtime status.
   ///
@@ -79,7 +229,9 @@ class FlutterVless {
     String groupIdentifier = "",
   }) async {
     await VlessPlatform.instance.initializeVless(
-      onStatusChanged: onStatusChanged,
+      onStatusChanged: (status) {
+        onStatusChanged(VlessStatus.fromPlatform(status));
+      },
       notificationIconResourceType: notificationIconResourceType,
       notificationIconResourceName: notificationIconResourceName,
       providerBundleIdentifier: providerBundleIdentifier,
@@ -169,6 +321,32 @@ class FlutterVless {
   /// `xray.exe`.
   Future<String> getCoreVersion() async {
     return await VlessPlatform.instance.getCoreVersion();
+  }
+
+  /// Runs a fresh end-to-end health check inside the Packet Tunnel extension.
+  /// A healthy result requires Xray, HEV, the local SOCKS inbound, and an exact
+  /// HTTP 204 response through the selected proxy node.
+  Future<IosTunnelHealth> getTunnelHealth() async {
+    final value = await _nativeChannel.invokeMapMethod<Object?, Object?>(
+      'getTunnelHealth',
+    );
+    if (value == null) {
+      throw StateError('The iOS Packet Tunnel returned no health result.');
+    }
+    return IosTunnelHealth.fromMap(value);
+  }
+
+  /// Returns NEVPN state plus the App Group's persistent session and counters.
+  /// The session ID stays stable across Flutter process restarts and changes
+  /// only when NetworkExtension starts a new Packet Tunnel session.
+  Future<IosTunnelSnapshot> getTunnelSnapshot() async {
+    final value = await _nativeChannel.invokeMapMethod<Object?, Object?>(
+      'getTunnelSnapshot',
+    );
+    if (value == null) {
+      throw StateError('The iOS Packet Tunnel returned no runtime snapshot.');
+    }
+    return IosTunnelSnapshot.fromMap(value);
   }
 
   /// Parse a share link, raw Xray JSON config, or subscription payload.

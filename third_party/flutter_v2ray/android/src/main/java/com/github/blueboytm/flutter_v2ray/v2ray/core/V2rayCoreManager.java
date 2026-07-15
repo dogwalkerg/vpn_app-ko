@@ -26,6 +26,8 @@ import com.github.blueboytm.flutter_v2ray.v2ray.utils.V2rayConfig;
 
 import org.json.JSONObject;
 
+import java.util.UUID;
+
 import libv2ray.Libv2ray;
 import libv2ray.V2RayPoint;
 import libv2ray.V2RayVPNServiceSupportsSet;
@@ -88,6 +90,8 @@ public final class V2rayCoreManager {
     private long totalDownload, totalUpload, uploadSpeed, downloadSpeed;
     private volatile boolean tunnelReady = false;
     private volatile String tunnelError = "";
+    private volatile String sessionId = "";
+    private volatile long sessionGeneration;
     private String SERVICE_DURATION = "00:00:00";
 
     public static V2rayCoreManager getInstance() {
@@ -121,13 +125,17 @@ public final class V2rayCoreManager {
                     collectProxyTraffic();
                 }
                 SERVICE_DURATION = Utilities.convertIntToTwoDigit(hours) + ":" + Utilities.convertIntToTwoDigit(minutes) + ":" + Utilities.convertIntToTwoDigit(seconds);
-                Intent connection_info_intent = new Intent("V2RAY_CONNECTION_INFO");
+                Intent connection_info_intent = new Intent(AppConfigs.CONNECTION_INFO_ACTION);
+                connection_info_intent.setPackage(context.getPackageName());
                 connection_info_intent.putExtra("STATE", V2rayCoreManager.getInstance().V2RAY_STATE);
                 connection_info_intent.putExtra("DURATION", SERVICE_DURATION);
                 connection_info_intent.putExtra("UPLOAD_SPEED", uploadSpeed);
                 connection_info_intent.putExtra("DOWNLOAD_SPEED", downloadSpeed);
                 connection_info_intent.putExtra("UPLOAD_TRAFFIC", totalUpload);
                 connection_info_intent.putExtra("DOWNLOAD_TRAFFIC", totalDownload);
+                connection_info_intent.putExtra("SESSION_ID", sessionId);
+                connection_info_intent.putExtra("GENERATION", sessionGeneration);
+                persistConnectionInfo(context);
                 context.sendBroadcast(connection_info_intent);
             }
 
@@ -160,12 +168,6 @@ public final class V2rayCoreManager {
     }
 
     public boolean startCore(final V2rayConfig v2rayConfig) {
-        tunnelReady = false;
-        tunnelError = "";
-        makeDurationTimer(v2rayServicesListener.getService().getApplicationContext(),
-                v2rayConfig.ENABLE_TRAFFIC_STATICS);
-        V2RAY_STATE = AppConfigs.V2RAY_STATES.V2RAY_CONNECTING;
-        broadcastConnectionInfo();
         if (!isLibV2rayCoreInitialized) {
             Log.e(V2rayCoreManager.class.getSimpleName(), "startCore failed => LibV2rayCore should be initialize before start.");
             return false;
@@ -173,6 +175,14 @@ public final class V2rayCoreManager {
         if (isV2rayCoreRunning()) {
             stopCore();
         }
+        sessionId = UUID.randomUUID().toString();
+        sessionGeneration = Math.max(System.currentTimeMillis(), sessionGeneration + 1L);
+        tunnelReady = false;
+        tunnelError = "";
+        makeDurationTimer(v2rayServicesListener.getService().getApplicationContext(),
+                v2rayConfig.ENABLE_TRAFFIC_STATICS);
+        V2RAY_STATE = AppConfigs.V2RAY_STATES.V2RAY_CONNECTING;
+        broadcastConnectionInfo();
         try {
             v2RayPoint.setConfigureFileContent(v2rayConfig.V2RAY_FULL_JSON_CONFIG);
             v2RayPoint.setDomainName(v2rayConfig.CONNECTED_V2RAY_SERVER_ADDRESS + ":" + v2rayConfig.CONNECTED_V2RAY_SERVER_PORT);
@@ -208,8 +218,13 @@ public final class V2rayCoreManager {
     }
 
     private void broadcastConnectionInfo() {
+        broadcastConnectionInfo(null);
+    }
+
+    public void broadcastConnectionInfo(String queryId) {
         if (v2rayServicesListener == null) return;
-        Intent intent = new Intent("V2RAY_CONNECTION_INFO");
+        Intent intent = new Intent(AppConfigs.CONNECTION_INFO_ACTION);
+        intent.setPackage(v2rayServicesListener.getService().getPackageName());
         intent.putExtra("STATE", V2RAY_STATE);
         intent.putExtra("DURATION", SERVICE_DURATION);
         intent.putExtra("UPLOAD_SPEED", uploadSpeed);
@@ -217,12 +232,21 @@ public final class V2rayCoreManager {
         intent.putExtra("UPLOAD_TRAFFIC", totalUpload);
         intent.putExtra("DOWNLOAD_TRAFFIC", totalDownload);
         intent.putExtra("ERROR", tunnelError);
+        intent.putExtra("SESSION_ID", sessionId);
+        intent.putExtra("GENERATION", sessionGeneration);
+        if (queryId != null) intent.putExtra("QUERY_ID", queryId);
+        persistConnectionInfo(v2rayServicesListener.getService().getApplicationContext());
         v2rayServicesListener.getService().getApplicationContext().sendBroadcast(intent);
     }
 
     public void stopCore() {
+        Context context = v2rayServicesListener == null
+                ? null
+                : v2rayServicesListener.getService().getApplicationContext();
         try {
-            NotificationManager notificationManager = (NotificationManager) v2rayServicesListener.getService().getSystemService(Context.NOTIFICATION_SERVICE);
+            NotificationManager notificationManager = context == null
+                    ? null
+                    : (NotificationManager) context.getSystemService(Context.NOTIFICATION_SERVICE);
             if (notificationManager != null) {
                 notificationManager.cancel(NOTIFICATION_ID);
             }
@@ -232,18 +256,19 @@ public final class V2rayCoreManager {
                 collectProxyTraffic();
                 broadcastConnectionInfo();
                 v2RayPoint.stopLoop();
-                v2rayServicesListener.stopService();
+                if (v2rayServicesListener != null) v2rayServicesListener.stopService();
                 Log.e(V2rayCoreManager.class.getSimpleName(), "stopCore success => v2ray core stopped.");
             } else {
                 Log.e(V2rayCoreManager.class.getSimpleName(), "stopCore failed => v2ray core not running.");
             }
-            sendDisconnectedBroadCast();
         } catch (Exception e) {
             Log.e(V2rayCoreManager.class.getSimpleName(), "stopCore failed =>", e);
+        } finally {
+            sendDisconnectedBroadCast(context);
         }
     }
 
-    private void sendDisconnectedBroadCast() {
+    private void sendDisconnectedBroadCast(Context context) {
         V2RAY_STATE = AppConfigs.V2RAY_STATES.V2RAY_DISCONNECTED;
         SERVICE_DURATION = "00:00:00";
         seconds = 0;
@@ -252,16 +277,20 @@ public final class V2rayCoreManager {
         uploadSpeed = 0;
         downloadSpeed = 0;
         tunnelReady = false;
-        if (v2rayServicesListener != null) {
-            Intent connection_info_intent = new Intent("V2RAY_CONNECTION_INFO");
+        if (context != null) {
+            Intent connection_info_intent = new Intent(AppConfigs.CONNECTION_INFO_ACTION);
+            connection_info_intent.setPackage(context.getPackageName());
             connection_info_intent.putExtra("STATE", V2rayCoreManager.getInstance().V2RAY_STATE);
             connection_info_intent.putExtra("DURATION", SERVICE_DURATION);
             connection_info_intent.putExtra("UPLOAD_SPEED", uploadSpeed);
             connection_info_intent.putExtra("DOWNLOAD_SPEED", downloadSpeed);
             connection_info_intent.putExtra("UPLOAD_TRAFFIC", totalUpload);
             connection_info_intent.putExtra("DOWNLOAD_TRAFFIC", totalDownload);
+            connection_info_intent.putExtra("SESSION_ID", sessionId);
+            connection_info_intent.putExtra("GENERATION", sessionGeneration);
+            persistConnectionInfo(context);
             try {
-                v2rayServicesListener.getService().getApplicationContext().sendBroadcast(connection_info_intent);
+                context.sendBroadcast(connection_info_intent);
             } catch (Exception e) {
                 //ignore
             }
@@ -269,6 +298,21 @@ public final class V2rayCoreManager {
         if (countDownTimer != null) {
             countDownTimer.cancel();
         }
+        sessionId = "";
+    }
+
+    private void persistConnectionInfo(Context context) {
+        context.getSharedPreferences("flutter_v2ray_native_state", Context.MODE_PRIVATE)
+                .edit()
+                .putString("state", V2RAY_STATE.toString())
+                .putString("duration", SERVICE_DURATION)
+                .putLong("upload_speed", uploadSpeed)
+                .putLong("download_speed", downloadSpeed)
+                .putLong("upload", totalUpload)
+                .putLong("download", totalDownload)
+                .putString("session_id", sessionId)
+                .putLong("generation", sessionGeneration)
+                .apply();
     }
 
     private synchronized void collectProxyTraffic() {

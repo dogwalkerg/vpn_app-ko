@@ -64,9 +64,7 @@ class VpnController extends StateNotifier<VpnState> {
       }
     });
 
-    _vpnSub = VpnChannel().onStatus
-        .distinct((a, b) => a.stage == b.stage)
-        .listen(_onVpnStatus);
+    _vpnSub = VpnChannel().onStatus.listen(_onVpnStatus);
 
     ref.onDispose(() => _vpnSub?.cancel());
     ref.onDispose(() => _connectTimeout?.cancel());
@@ -113,7 +111,10 @@ class VpnController extends StateNotifier<VpnState> {
         }
         break;
       case VpnStage.disconnected:
-        if (state is VpnDisconnecting) {
+        final reason = e.reason?.trim();
+        if (state is VpnConnected && reason != null && reason.isNotEmpty) {
+          state = VpnError(reason);
+        } else if (state is VpnDisconnecting) {
           state = const VpnIdle();
         } else if (state is VpnConnecting) {
         } else if (state is! VpnIdle) {
@@ -143,7 +144,7 @@ class VpnController extends StateNotifier<VpnState> {
     final generation = ++_operationGeneration;
     state = const VpnConnecting();
     try {
-      await ref.read(forceSubscriptionNodesRefreshProvider)();
+      await ref.read(prepareSubscriptionNodesForConnectionProvider)();
     } catch (e) {
       if (!mounted || generation != _operationGeneration) return;
       state = VpnError(presentableError(e));

@@ -47,7 +47,8 @@ public enum TunnelXrayConfigPreparer {
 
     public static func prepare(
         jsonData: Data,
-        resolveIPv4: (String) -> String? = { _ in nil }
+        resolveIPv4: (String) -> String? = { _ in nil },
+        logLevel: String = TunnelRuntimePolicy.xrayLogLevel
     ) -> TunnelPreparedConfig? {
         do {
             guard var configJSON = try JSONSerialization.jsonObject(with: jsonData, options: []) as? [String: Any] else {
@@ -58,21 +59,21 @@ public enum TunnelXrayConfigPreparer {
             if var log = configJSON["log"] as? [String: Any] {
                 log["access"] = ""
                 log["error"] = ""
-                log["loglevel"] = "debug"
+                log["loglevel"] = logLevel
                 log["dnsLog"] = false
                 configJSON["log"] = log
             } else {
                 configJSON["log"] = [
                     "access": "",
                     "error": "",
-                    "loglevel": "debug",
+                    "loglevel": logLevel,
                     "dnsLog": false
                 ]
             }
             messages.append("Disabled XRay file log outputs for packet tunnel")
 
             if configJSON.removeValue(forKey: "dns") != nil {
-                messages.append("Removed Xray DNS config; iOS tunnel DNS settings will handle system DNS")
+                messages.append("Removed Xray DNS config; system DNS packets are carried by the packet tunnel")
             }
 
             if var routing = configJSON["routing"] as? [String: Any] {
@@ -91,7 +92,10 @@ public enum TunnelXrayConfigPreparer {
                     inbounds[index]["sniffing"] = [
                         "enabled": true,
                         "destOverride": ["http", "tls", "quic"],
-                        "routeOnly": false
+                        // Keep the original IP destination. Letting Xray replace
+                        // it with the sniffed domain would make the extension
+                        // resolve that domain outside NetworkExtension routing.
+                        "routeOnly": true
                     ]
                 }
                 configJSON["inbounds"] = inbounds
@@ -111,10 +115,23 @@ public enum TunnelXrayConfigPreparer {
                     let security = streamSettings["security"] as? String ?? "?"
                     proxyUsesXhttp = network == "xhttp"
 
-                    if network == "xhttp" && security.lowercased() == "none" {
-                        messages.append("Keeping XHTTP/none proxy domain in Xray config")
-                    } else if replaceProxyServerDomainWithIPv4(outbound: &outbounds[index], resolveIPv4: resolveIPv4) {
-                        messages.append("Resolved proxy server domain to IPv4 in Xray config")
+                    let originalAddress = serverAddress(outbound: outbounds[index])
+                    if replaceProxyServerDomainWithIPv4(outbound: &outbounds[index], resolveIPv4: resolveIPv4) {
+                        if network == "xhttp", let originalAddress {
+                            preserveXhttpHost(
+                                originalAddress,
+                                streamSettings: &streamSettings
+                            )
+                            messages.append("Pinned XHTTP proxy endpoint to IPv4 while preserving its HTTP host")
+                        } else {
+                            messages.append("Resolved proxy server domain to IPv4 in Xray config")
+                        }
+                    } else if network == "xhttp" && security.lowercased() == "none" {
+                        if let originalAddress, shouldResolve(originalAddress) {
+                            messages.append("Could not resolve XHTTP/none proxy endpoint before tunnel startup")
+                        } else {
+                            messages.append("XHTTP/none proxy endpoint was already an IP literal")
+                        }
                     }
 
                     if var sockopt = streamSettings["sockopt"] as? [String: Any],
@@ -262,6 +279,38 @@ public enum TunnelXrayConfigPreparer {
         }
 
         return false
+    }
+
+    private static func serverAddress(outbound: [String: Any]) -> String? {
+        guard let settings = outbound["settings"] as? [String: Any] else {
+            return nil
+        }
+        if let vnext = settings["vnext"] as? [[String: Any]],
+           let address = vnext.first?["address"] as? String,
+           !address.isEmpty {
+            return address
+        }
+        if let servers = settings["servers"] as? [[String: Any]],
+           let address = servers.first?["address"] as? String,
+           !address.isEmpty {
+            return address
+        }
+        if let address = settings["address"] as? String, !address.isEmpty {
+            return address
+        }
+        return nil
+    }
+
+    private static func preserveXhttpHost(
+        _ originalAddress: String,
+        streamSettings: inout [String: Any]
+    ) {
+        var xhttp = streamSettings["xhttpSettings"] as? [String: Any] ?? [:]
+        let existingHost = (xhttp["host"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        if existingHost.isEmpty {
+            xhttp["host"] = originalAddress
+        }
+        streamSettings["xhttpSettings"] = xhttp
     }
 
     private static func normalizeStreamSettingsAliases(

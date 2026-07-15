@@ -75,4 +75,21 @@ void main() {
     expect((stream['wsSettings'] as Map)['path'], '/');
     expect((stream['realitySettings'] as Map)['fingerprint'], 'chrome');
   });
+
+  test('verifies TLS certificates unless the URI explicitly opts out', () {
+    Map tlsSettings(String query) {
+      final parser = FlutterV2ray.parseFromURL(
+        'vless://00000000-0000-0000-0000-000000000001@example.com:443'
+        '?security=tls&type=ws$query#node',
+      );
+      final config = jsonDecode(parser.getFullConfiguration()) as Map;
+      final proxy = (config['outbounds'] as List).first as Map;
+      final stream = proxy['streamSettings'] as Map;
+      return stream['tlsSettings'] as Map;
+    }
+
+    expect(tlsSettings('')['allowInsecure'], isFalse);
+    expect(tlsSettings('&allowInsecure=1')['allowInsecure'], isTrue);
+    expect(tlsSettings('&allowInsecure=false')['allowInsecure'], isFalse);
+  });
 }

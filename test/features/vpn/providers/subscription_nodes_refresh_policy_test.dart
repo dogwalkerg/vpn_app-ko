@@ -100,6 +100,30 @@ void main() {
     },
   );
 
+  test('connection preparation reuses fresh cached nodes', () async {
+    final api = _CountingSubscriptionApi();
+    final repository = _SubscriptionRepository(_activeSubscription);
+    final container = ProviderContainer(
+      overrides: [
+        cocoApiProvider.overrideWithValue(api),
+        subscriptionRepositoryProvider.overrideWithValue(repository),
+      ],
+    );
+    addTearDown(container.dispose);
+
+    await container.read(subscriptionControllerProvider.notifier).fetch();
+    expect(
+      await container.read(subscriptionNodesProvider.future),
+      hasLength(1),
+    );
+    expect(api.subscriptionCalls, 1);
+
+    await container.read(prepareSubscriptionNodesForConnectionProvider)();
+
+    expect(repository.fetchCalls, 0);
+    expect(api.subscriptionCalls, 1);
+  });
+
   test('failed automatic node refresh observes its retry cooldown', () async {
     final api = _CountingSubscriptionApi(fail: true);
     final repository = _SubscriptionRepository(_activeSubscription);

@@ -4,11 +4,13 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:vpn_app/features/subscription/providers/subscription_providers.dart';
 import 'package:vpn_app/features/vpn/models/subscription_node.dart';
+import 'package:vpn_app/features/vpn/platform/vpn_channel.dart';
 import 'package:vpn_app/features/vpn/providers/subscription_nodes_provider.dart';
 import 'package:vpn_app/features/vpn/providers/vpn_controller.dart';
 import 'package:vpn_app/features/vpn/usecases/connect_vpn_usecase.dart';
 import 'package:vpn_app/features/vpn/usecases/disconnect_vpn_usecase.dart';
 import 'package:vpn_app/features/vpn/usecases/is_connected_usecase.dart';
+import 'package:wireguard_flutter/wireguard_flutter.dart';
 
 void main() {
   test(
@@ -80,6 +82,58 @@ void main() {
     expect(controller.state, isA<VpnIdle>());
   });
 
+  test('connected desktop health failure is shown as an error', () async {
+    final container = _container(
+      connect: () async {},
+      disconnect: () async {},
+      isConnected: () async => false,
+    );
+    addTearDown(container.dispose);
+    final controller = container.read(vpnControllerProvider.notifier);
+    await _settleBootstrap();
+    await controller.connectPressed();
+    expect(controller.state, isA<VpnConnected>());
+
+    VpnChannel().report(
+      VpnStatusEvent(stage: VpnStage.disconnected, reason: '系统代理被其他软件修改，请重新连接'),
+    );
+    await _waitUntil(() => controller.state is VpnError);
+
+    expect((controller.state as VpnError).message, '系统代理被其他软件修改，请重新连接');
+  });
+
+  test(
+    'the same desktop health failure is delivered after reconnect',
+    () async {
+      final container = _container(
+        connect: () async {},
+        disconnect: () async {},
+        isConnected: () async => false,
+      );
+      addTearDown(container.dispose);
+      final controller = container.read(vpnControllerProvider.notifier);
+      await _settleBootstrap();
+
+      const reason = 'system proxy changed';
+      await controller.connectPressed();
+      VpnChannel().report(
+        VpnStatusEvent(stage: VpnStage.disconnected, reason: reason),
+      );
+      await _waitUntil(() => controller.state is VpnError);
+
+      await controller.connectPressed();
+      expect(controller.state, isA<VpnConnected>());
+      VpnChannel().report(
+        VpnStatusEvent(stage: VpnStage.disconnected, reason: reason),
+      );
+      await _waitUntil(
+        () =>
+            controller.state is VpnError &&
+            (controller.state as VpnError).message == reason,
+      );
+    },
+  );
+
   test('smart mode refreshes the fastest node before connecting', () async {
     final nodes = [_node('Node A', 443), _node('Node B', 8443)];
     var latencies = <String, int>{nodes[0].raw: 80, nodes[1].raw: 20};
@@ -88,7 +142,9 @@ void main() {
     container = ProviderContainer(
       overrides: [
         vpnAccessProvider.overrideWithValue(true),
-        forceSubscriptionNodesRefreshProvider.overrideWithValue(() async {}),
+        prepareSubscriptionNodesForConnectionProvider.overrideWithValue(
+          () async {},
+        ),
         subscriptionNodesProvider.overrideWith((ref) async => nodes),
         selectedSubscriptionNodeProvider.overrideWith((ref) => nodes.first),
         nodeLatencyProbeProvider.overrideWithValue(
@@ -158,10 +214,12 @@ void main() {
       final container = ProviderContainer(
         overrides: [
           vpnAccessProvider.overrideWithValue(true),
-          forceSubscriptionNodesRefreshProvider.overrideWithValue(() async {
-            refreshStarted.complete();
-            await releaseRefresh.future;
-          }),
+          prepareSubscriptionNodesForConnectionProvider.overrideWithValue(
+            () async {
+              refreshStarted.complete();
+              await releaseRefresh.future;
+            },
+          ),
           connectVpnUseCaseProvider.overrideWithValue(
             () async => connectCalls++,
           ),
@@ -195,10 +253,12 @@ void main() {
       final container = ProviderContainer(
         overrides: [
           vpnAccessProvider.overrideWithValue(true),
-          forceSubscriptionNodesRefreshProvider.overrideWithValue(() async {
-            refreshStarted.complete();
-            await releaseRefresh.future;
-          }),
+          prepareSubscriptionNodesForConnectionProvider.overrideWithValue(
+            () async {
+              refreshStarted.complete();
+              await releaseRefresh.future;
+            },
+          ),
           connectVpnUseCaseProvider.overrideWithValue(
             () async => connectCalls++,
           ),
@@ -246,7 +306,9 @@ ProviderContainer _container({
   return ProviderContainer(
     overrides: [
       vpnAccessProvider.overrideWithValue(true),
-      forceSubscriptionNodesRefreshProvider.overrideWithValue(() async {}),
+      prepareSubscriptionNodesForConnectionProvider.overrideWithValue(
+        () async {},
+      ),
       connectVpnUseCaseProvider.overrideWithValue(connect),
       disconnectVpnUseCaseProvider.overrideWithValue(disconnect),
       isVpnConnectedUseCaseProvider.overrideWithValue(isConnected),

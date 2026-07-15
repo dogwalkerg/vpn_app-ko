@@ -8,6 +8,18 @@ export 'auth_controller.dart';
 
 enum AuthSessionPhase { restoring, signedIn, signedOut }
 
+AuthSessionPhase initialAuthSessionPhase({
+  required bool localStoreInitialized,
+  required String? token,
+}) {
+  if (token != null && token.trim().isNotEmpty) {
+    return AuthSessionPhase.signedIn;
+  }
+  return localStoreInitialized
+      ? AuthSessionPhase.signedOut
+      : AuthSessionPhase.restoring;
+}
+
 /// Tracks whether a persisted session is still being restored at startup.
 ///
 /// This is intentionally separate from [AuthState]: loading user data must not

@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import 'model/v2ray_status.dart' show V2RayStatus;
@@ -10,6 +12,37 @@ class MethodChannelFlutterV2ray extends FlutterV2rayPlatform {
   @visibleForTesting
   final methodChannel = const MethodChannel('flutter_v2ray');
   final eventChannel = const EventChannel('flutter_v2ray/status');
+  StreamSubscription<dynamic>? _statusSubscription;
+
+  V2RayStatus _statusFromNative(dynamic event) {
+    if (event is Map) {
+      return V2RayStatus(
+        duration: event['duration']?.toString() ?? '00:00:00',
+        uploadSpeed: int.tryParse(event['uploadSpeed']?.toString() ?? '') ?? 0,
+        downloadSpeed:
+            int.tryParse(event['downloadSpeed']?.toString() ?? '') ?? 0,
+        upload: int.tryParse(event['upload']?.toString() ?? '') ?? 0,
+        download: int.tryParse(event['download']?.toString() ?? '') ?? 0,
+        state: event['state']?.toString() ?? 'DISCONNECTED',
+        error: event['error']?.toString() ?? '',
+        sessionId: event['sessionId']?.toString() ?? '',
+        generation: int.tryParse(event['generation']?.toString() ?? '') ?? 0,
+      );
+    }
+    final values = event as List;
+    return V2RayStatus(
+      duration: values[0].toString(),
+      uploadSpeed: int.tryParse(values[1].toString()) ?? 0,
+      downloadSpeed: int.tryParse(values[2].toString()) ?? 0,
+      upload: int.tryParse(values[3].toString()) ?? 0,
+      download: int.tryParse(values[4].toString()) ?? 0,
+      state: values[5].toString(),
+      error: values.length > 6 ? values[6].toString() : '',
+      sessionId: values.length > 7 ? values[7].toString() : '',
+      generation:
+          values.length > 8 ? int.tryParse(values[8].toString()) ?? 0 : 0,
+    );
+  }
 
   @override
   Future<void> initializeV2Ray({
@@ -17,17 +50,10 @@ class MethodChannelFlutterV2ray extends FlutterV2rayPlatform {
     required String notificationIconResourceType,
     required String notificationIconResourceName,
   }) async {
-    eventChannel.receiveBroadcastStream().distinct().cast().listen((event) {
+    await _statusSubscription?.cancel();
+    _statusSubscription = eventChannel.receiveBroadcastStream().listen((event) {
       if (event != null) {
-        onStatusChanged.call(V2RayStatus(
-          duration: event[0],
-          uploadSpeed: int.parse(event[1]),
-          downloadSpeed: int.parse(event[2]),
-          upload: int.parse(event[3]),
-          download: int.parse(event[4]),
-          state: event[5],
-          error: event.length > 6 ? event[6].toString() : '',
-        ));
+        onStatusChanged.call(_statusFromNative(event));
       }
     });
     await methodChannel.invokeMethod(
@@ -37,6 +63,7 @@ class MethodChannelFlutterV2ray extends FlutterV2rayPlatform {
         "notificationIconResourceName": notificationIconResourceName,
       },
     );
+    onStatusChanged.call(await getV2RayStatus());
   }
 
   @override
@@ -61,6 +88,12 @@ class MethodChannelFlutterV2ray extends FlutterV2rayPlatform {
   @override
   Future<void> stopV2Ray() async {
     await methodChannel.invokeMethod('stopV2Ray');
+  }
+
+  @override
+  Future<V2RayStatus> getV2RayStatus() async {
+    final status = await methodChannel.invokeMethod<dynamic>('getV2RayStatus');
+    return _statusFromNative(status);
   }
 
   @override

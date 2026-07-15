@@ -24,7 +24,8 @@
 ## Change logs
 ### 1.0.10
 
-* update xray core version to 25.3.6
+* update xray core version to 25.3.31
+* use HEV 2.15.0 tun2socks with IPv4/IPv6 and 16 KB page support
 
 #### [see more](./CHANGELOG.md)
 

@@ -28,6 +28,24 @@ import 'package:vpn_app/ui/theme/light_theme.dart';
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
 
+  test('cached auth state maps to a signed-in first frame', () {
+    expect(
+      initialAuthSessionPhase(
+        localStoreInitialized: true,
+        token: 'cached-token',
+      ),
+      AuthSessionPhase.signedIn,
+    );
+    expect(
+      initialAuthSessionPhase(localStoreInitialized: true, token: null),
+      AuthSessionPhase.signedOut,
+    );
+    expect(
+      initialAuthSessionPhase(localStoreInitialized: false, token: null),
+      AuthSessionPhase.restoring,
+    );
+  });
+
   testWidgets('router follows signed-out, signed-in, and signed-out phases', (
     tester,
   ) async {
@@ -302,7 +320,10 @@ class _ControlledSecureStorage extends FlutterSecureStoragePlatform {
   Future<String?> read({
     required String key,
     required Map<String, String> options,
-  }) => _readCompleter.future;
+  }) {
+    if (key == 'auth_session_state_v2') return Future<String?>.value();
+    return _readCompleter.future;
+  }
 
   @override
   Future<Map<String, String>> readAll({

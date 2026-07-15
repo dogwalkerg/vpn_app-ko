@@ -96,6 +96,8 @@ class TrafficAccountingController extends StateNotifier<TrafficAccountingState>
   String? _nativeSessionId;
   int _lastNativeUpload = 0;
   int _lastNativeDownload = 0;
+  bool _nativeCursorRestored = true;
+  VpnStatusEvent? _deferredNativeEvent;
   int? _lastDesktopUpload;
   int? _lastDesktopDownload;
   DateTime? _lastDesktopSampleAt;
@@ -105,6 +107,8 @@ class TrafficAccountingController extends StateNotifier<TrafficAccountingState>
       _stopAccountChecks();
       _accountKey = null;
       _restoreFuture = Future<void>.value();
+      _nativeCursorRestored = true;
+      _deferredNativeEvent = null;
       _resetCounters(clearRestriction: true);
       return;
     }
@@ -117,9 +121,14 @@ class TrafficAccountingController extends StateNotifier<TrafficAccountingState>
       _nextRetryAt = null;
       _lastAccountSyncAt = null;
       _lastAccountSyncAttemptAt = null;
+      _nativeSessionId = null;
+      _lastNativeUpload = 0;
+      _lastNativeDownload = 0;
+      _deferredNativeEvent = null;
       _publishPending(syncing: false);
     }
     _accountKey = accountKey;
+    _nativeCursorRestored = false;
     _restoreFuture = _restorePendingBatch(accountKey);
     _startAccountChecks();
     _updateHeartbeatTimer();
@@ -183,9 +192,6 @@ class TrafficAccountingController extends StateNotifier<TrafficAccountingState>
 
   void _beginConnection() {
     _lastBatchReportAt = DateTime.now();
-    _lastNativeUpload = 0;
-    _lastNativeDownload = 0;
-    _nativeSessionId = null;
     _lastDesktopUpload = null;
     _lastDesktopDownload = null;
     _lastDesktopSampleAt = null;
@@ -226,7 +232,23 @@ class TrafficAccountingController extends StateNotifier<TrafficAccountingState>
   }
 
   void _onVpnEvent(VpnStatusEvent event) {
-    if (event.stage != VpnStage.connected ||
+    if ((event.stage != VpnStage.connected &&
+            event.stage != VpnStage.disconnecting) ||
+        event.uploadBytesTotal == null ||
+        event.downloadBytesTotal == null) {
+      return;
+    }
+
+    if (!_nativeCursorRestored) {
+      _deferredNativeEvent = event;
+      return;
+    }
+    unawaited(_enqueue(() => _processNativeEvent(event)));
+  }
+
+  Future<void> _processNativeEvent(VpnStatusEvent event) async {
+    if (_disposed ||
+        _enforcingRestriction ||
         event.uploadBytesTotal == null ||
         event.downloadBytesTotal == null) {
       return;
@@ -251,6 +273,19 @@ class TrafficAccountingController extends StateNotifier<TrafficAccountingState>
     final downloadDelta = downloadTotal >= _lastNativeDownload
         ? downloadTotal - _lastNativeDownload
         : 0;
+
+    // Persist the new cursor and its unreported delta in one JSON value before
+    // publishing it in memory. If Flutter is killed after this write, restore
+    // resumes from the same cursor and pending byte count. If the write fails,
+    // the old cursor is retained on disk so a restart may replay, but never
+    // silently lose, those bytes.
+    final prospectivePending = _pendingBytes + uploadDelta + downloadDelta;
+    await _persistLedger(
+      pendingBytes: prospectivePending,
+      nativeSessionId: sessionId,
+      nativeUpload: uploadTotal,
+      nativeDownload: downloadTotal,
+    );
     _lastNativeUpload = uploadTotal;
     _lastNativeDownload = downloadTotal;
 
@@ -259,6 +294,7 @@ class TrafficAccountingController extends StateNotifier<TrafficAccountingState>
       downloadDelta: downloadDelta,
       uploadSpeed: event.uploadBytesPerSecond ?? 0,
       downloadSpeed: event.downloadBytesPerSecond ?? 0,
+      allowDisconnected: event.stage == VpnStage.disconnecting,
     );
   }
 
@@ -320,8 +356,11 @@ class TrafficAccountingController extends StateNotifier<TrafficAccountingState>
     required int downloadDelta,
     required int uploadSpeed,
     required int downloadSpeed,
+    bool allowDisconnected = false,
   }) {
-    if (!state.connected || _enforcingRestriction) return;
+    if ((!state.connected && !allowDisconnected) || _enforcingRestriction) {
+      return;
+    }
     final delta = uploadDelta + downloadDelta;
     if (delta > 0) _pendingBytes += delta;
     state = state.copyWith(
@@ -381,7 +420,11 @@ class TrafficAccountingController extends StateNotifier<TrafficAccountingState>
             id: queued?.id ?? const Uuid().v4(),
             bytes: (queued?.bytes ?? 0) + _pendingBytes,
           );
-          if (await _persistPendingBatches(existing, combined)) {
+          if (await _persistPendingBatches(
+            existing,
+            combined,
+            pendingBytes: 0,
+          )) {
             _pendingBytes = 0;
             _queuedBatch = combined;
             _publishPending(syncing: false);
@@ -392,7 +435,7 @@ class TrafficAccountingController extends StateNotifier<TrafficAccountingState>
           id: existing.id,
           bytes: existing.bytes + _pendingBytes,
         );
-        if (await _persistPendingBatch(combined)) {
+        if (await _persistPendingBatch(combined, pendingBytes: 0)) {
           _pendingBytes = 0;
           _retryBatch = combined;
           _publishPending(syncing: false);
@@ -403,7 +446,7 @@ class TrafficAccountingController extends StateNotifier<TrafficAccountingState>
         id: const Uuid().v4(),
         bytes: _pendingBytes,
       );
-      if (await _persistPendingBatch(batch)) {
+      if (await _persistPendingBatch(batch, pendingBytes: 0)) {
         _pendingBytes = 0;
         _retryBatch = batch;
         _retryBatchNeedsRetry = false;
@@ -515,7 +558,7 @@ class TrafficAccountingController extends StateNotifier<TrafficAccountingState>
           id: existing.id,
           bytes: existing.bytes + _pendingBytes,
         );
-        if (!await _persistPendingBatch(combined)) {
+        if (!await _persistPendingBatch(combined, pendingBytes: 0)) {
           allReported = false;
           return;
         }
@@ -530,7 +573,7 @@ class TrafficAccountingController extends StateNotifier<TrafficAccountingState>
           id: const Uuid().v4(),
           bytes: _pendingBytes,
         );
-        if (!await _persistPendingBatch(batch)) {
+        if (!await _persistPendingBatch(batch, pendingBytes: 0)) {
           allReported = false;
           return;
         }
@@ -768,39 +811,88 @@ class TrafficAccountingController extends StateNotifier<TrafficAccountingState>
           : <_PendingTrafficBatch>[
               if (_batchFromJson(data) case final batch?) batch,
             ];
-      if (batches.isEmpty) {
-        await prefs.remove(_pendingStorageKey(accountKey));
-        return;
-      }
-      _retryBatch = batches.first;
+      _retryBatch = batches.isEmpty ? null : batches.first;
       _queuedBatch = batches.length > 1 ? batches[1] : null;
-      _retryBatchNeedsRetry = true;
+      _retryBatchNeedsRetry = _retryBatch != null;
+      _pendingBytes = _asInt(data['pending_bytes']);
+      final cursor = data['native_cursor'];
+      if (cursor is Map) {
+        final sessionId = cursor['session_id']?.toString().trim() ?? '';
+        if (sessionId.isNotEmpty) {
+          _nativeSessionId = sessionId;
+          _lastNativeUpload = _asInt(cursor['upload']);
+          _lastNativeDownload = _asInt(cursor['download']);
+        }
+      }
       _nextRetryAt = null;
       _publishPending(syncing: false);
     } catch (_) {
       // A later flush can still persist newly collected traffic.
+    } finally {
+      if (_accountKey == accountKey) {
+        _nativeCursorRestored = true;
+        final deferred = _deferredNativeEvent;
+        _deferredNativeEvent = null;
+        if (deferred != null) {
+          unawaited(_enqueue(() => _processNativeEvent(deferred)));
+        }
+      }
     }
   }
 
-  Future<bool> _persistPendingBatch(_PendingTrafficBatch batch) async {
-    return _persistPendingBatches(batch, _queuedBatch);
+  Future<bool> _persistPendingBatch(
+    _PendingTrafficBatch batch, {
+    int? pendingBytes,
+  }) async {
+    return _persistPendingBatches(
+      batch,
+      _queuedBatch,
+      pendingBytes: pendingBytes,
+    );
   }
 
   Future<bool> _persistPendingBatches(
     _PendingTrafficBatch head,
-    _PendingTrafficBatch? queued,
-  ) async {
+    _PendingTrafficBatch? queued, {
+    int? pendingBytes,
+  }) async {
+    return _persistLedger(
+      batches: [head, if (queued != null) queued],
+      pendingBytes: pendingBytes,
+    );
+  }
+
+  Future<bool> _persistLedger({
+    List<_PendingTrafficBatch>? batches,
+    int? pendingBytes,
+    String? nativeSessionId,
+    int? nativeUpload,
+    int? nativeDownload,
+  }) async {
     final accountKey = _accountKey;
     if (accountKey == null) return false;
     try {
       final prefs = await SharedPreferences.getInstance();
+      final sessionId = nativeSessionId ?? _nativeSessionId;
       return prefs.setString(
         _pendingStorageKey(accountKey),
         jsonEncode({
-          'batches': [
-            _batchToJson(head),
-            if (queued != null) _batchToJson(queued),
-          ],
+          'version': 2,
+          'batches':
+              (batches ??
+                      [
+                        if (_retryBatch != null) _retryBatch!,
+                        if (_queuedBatch != null) _queuedBatch!,
+                      ])
+                  .map(_batchToJson)
+                  .toList(),
+          'pending_bytes': pendingBytes ?? _pendingBytes,
+          if (sessionId != null && sessionId.isNotEmpty)
+            'native_cursor': {
+              'session_id': sessionId,
+              'upload': nativeUpload ?? _lastNativeUpload,
+              'download': nativeDownload ?? _lastNativeDownload,
+            },
         }),
       );
     } catch (_) {
@@ -828,13 +920,7 @@ class TrafficAccountingController extends StateNotifier<TrafficAccountingState>
         return false;
       }
       final queued = _queuedBatch;
-      if (queued == null) return prefs.remove(key);
-      return prefs.setString(
-        key,
-        jsonEncode({
-          'batches': [_batchToJson(queued)],
-        }),
-      );
+      return _persistLedger(batches: [if (queued != null) queued]);
     } catch (_) {
       return false;
     }
@@ -884,6 +970,8 @@ class TrafficAccountingController extends StateNotifier<TrafficAccountingState>
     _nativeSessionId = null;
     _lastNativeUpload = 0;
     _lastNativeDownload = 0;
+    _nativeCursorRestored = _accountKey == null;
+    _deferredNativeEvent = null;
     _lastDesktopUpload = null;
     _lastDesktopDownload = null;
     _lastDesktopSampleAt = null;

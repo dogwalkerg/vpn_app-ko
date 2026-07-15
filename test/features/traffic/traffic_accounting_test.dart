@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 
+import 'package:crypto/crypto.dart';
 import 'package:dio/dio.dart';
 import 'package:flutter/widgets.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -8,6 +9,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:vpn_app/core/api/api_service.dart';
 import 'package:vpn_app/core/api/coco_api.dart';
+import 'package:vpn_app/core/network/connectivity_provider.dart';
 import 'package:vpn_app/features/auth/providers/auth_providers.dart';
 import 'package:vpn_app/features/subscription/models/subscription_state.dart';
 import 'package:vpn_app/features/subscription/models/subscription_status.dart';
@@ -23,8 +25,12 @@ import 'package:wireguard_flutter/wireguard_flutter.dart';
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
 
-  setUp(() {
+  setUp(() async {
+    // Let disposal work from the previous test drain before replacing the
+    // shared-preferences mock. Native cursor writes are intentionally durable.
+    await Future<void>.delayed(Duration.zero);
     SharedPreferences.setMockInitialValues({});
+    await (await SharedPreferences.getInstance()).clear();
   });
 
   test('state derives and accumulates session totals', () {
@@ -151,6 +157,71 @@ void main() {
       expect(state.sessionDownloadBytes, 290);
       expect(state.sessionBytes, 460);
       expect(state.pendingBytes, 460);
+
+      VpnChannel().report(
+        VpnStatusEvent(
+          stage: VpnStage.disconnecting,
+          sessionId: 'session-b',
+          uploadBytesTotal: 25,
+          downloadBytesTotal: 35,
+        ),
+      );
+      await _waitUntil(() => accounting.state.pendingBytes == 470);
+      expect(accounting.state.sessionUploadBytes, 175);
+      expect(accounting.state.sessionDownloadBytes, 295);
+    },
+  );
+
+  test(
+    'durable native cursor counts only traffic added while Flutter was stopped',
+    () async {
+      const token = 'durable-native-cursor-account';
+      final first = _trafficContainer(_RecordingTrafficCocoApi());
+      final firstAccounting = first.read(trafficAccountingProvider.notifier);
+      first.read(tokenProvider.notifier).state = token;
+      await Future<void>.delayed(Duration.zero);
+      final firstVpn =
+          first.read(vpnControllerProvider.notifier) as _TestVpnController;
+      firstVpn.emitConnected();
+      await Future<void>.delayed(Duration.zero);
+      VpnChannel().report(
+        VpnStatusEvent(
+          stage: VpnStage.connected,
+          sessionId: 'persistent-native-session',
+          uploadBytesTotal: 100,
+          downloadBytesTotal: 200,
+        ),
+      );
+      await _waitUntil(() => firstAccounting.state.pendingBytes == 300);
+      first.dispose();
+      await Future<void>.delayed(Duration.zero);
+
+      final second = _trafficContainer(_RecordingTrafficCocoApi());
+      addTearDown(second.dispose);
+      final secondAccounting = second.read(trafficAccountingProvider.notifier);
+      second.read(tokenProvider.notifier).state = token;
+      await _waitUntil(() => secondAccounting.state.pendingBytes == 300);
+      final secondVpn =
+          second.read(vpnControllerProvider.notifier) as _TestVpnController;
+      secondVpn.emitConnected();
+      await Future<void>.delayed(Duration.zero);
+
+      // These totals include 110 bytes transferred while Runner was absent.
+      // The first 300 bytes remain pending but must not be counted a second time.
+      VpnChannel().report(
+        VpnStatusEvent(
+          stage: VpnStage.connected,
+          sessionId: 'persistent-native-session',
+          uploadBytesTotal: 150,
+          downloadBytesTotal: 260,
+        ),
+      );
+      await _waitUntil(() => secondAccounting.state.pendingBytes == 410);
+
+      final state = secondAccounting.state;
+      expect(state.sessionUploadBytes, 50);
+      expect(state.sessionDownloadBytes, 60);
+      expect(state.pendingBytes, 410);
     },
   );
 
@@ -648,6 +719,9 @@ void main() {
       overrides: [
         cocoApiProvider.overrideWithValue(api),
         subscriptionRepositoryProvider.overrideWithValue(repository),
+        connectivityChangesProvider.overrideWith(
+          (ref) => Stream<OnlineStatus>.value(OnlineStatus.online),
+        ),
         vpnAccessProvider.overrideWithValue(true),
         vpnControllerProvider.overrideWith((ref) => _TestVpnController(ref)),
       ],
@@ -760,8 +834,7 @@ void main() {
     accounting.didChangeAppLifecycleState(AppLifecycleState.paused);
     final preferences = await SharedPreferences.getInstance();
     await _waitUntil(() {
-      if (preferences.getKeys().isEmpty) return false;
-      final raw = preferences.getString(preferences.getKeys().single);
+      final raw = preferences.getString(_pendingKey(token));
       final data = raw == null ? null : jsonDecode(raw);
       return data is Map &&
           data['batches'] is List &&
@@ -837,10 +910,19 @@ void main() {
       retryApi.releasePositive();
       await _waitUntil(() => restoredAccounting.state.pendingBytes == 0);
       expect(restoredAccounting.state.pendingBytes, 0);
-      expect((await SharedPreferences.getInstance()).getKeys(), isEmpty);
+      final raw = (await SharedPreferences.getInstance()).getString(
+        _pendingKey(token),
+      );
+      final ledger = jsonDecode(raw!) as Map;
+      expect(ledger['batches'], isEmpty);
+      expect(ledger['pending_bytes'], 0);
+      expect(ledger['native_cursor'], isNotNull);
     },
   );
 }
+
+String _pendingKey(String token) =>
+    'traffic.pending.v1.${sha256.convert(utf8.encode(token))}';
 
 ProviderContainer _trafficContainer(CocoApi api) {
   return ProviderContainer(

@@ -2,9 +2,7 @@
     package="com.github.blueboytm.flutter_v2ray">
 
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
-    <uses-permission android:name="android.permission.CHANGE_NETWORK_STATE" />
     <uses-permission android:name="android.permission.INTERNET" />
-    <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <uses-permission
@@ -34,13 +32,5 @@
                 android:name="android.net.VpnService.SUPPORTS_ALWAYS_ON"
                 android:value="true" />
         </service>
-
-        <receiver
-            android:name="com.github.blueboytm.flutter_v2ray.v2ray.V2rayReceiver"
-            android:exported="true">
-            <intent-filter>
-                <action android:name="V2RAY_CONNECTION_INFO" />
-            </intent-filter>
-        </receiver>
     </application>
 </manifest>

@@ -95,8 +95,8 @@ BEGIN
             VALUE "InternalName", "Osca" "\0"
             VALUE "LegalCopyright", "Copyright (C) 2025 com.example. All rights reserved." "\0"
             VALUE "OriginalFilename", "Osca.exe" "\0"
-            // Kept stable because path_provider_windows uses this value for
-            // the application-support directory and existing login state.
+            // Keep this storage identity stable: path_provider_windows uses
+            // ProductName for %APPDATA% and existing sessions live in vpn_app.
             VALUE "ProductName", "vpn_app" "\0"
             VALUE "ProductVersion", VERSION_AS_STRING "\0"
         END

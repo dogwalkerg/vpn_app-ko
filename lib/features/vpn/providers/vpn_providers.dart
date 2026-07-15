@@ -8,12 +8,16 @@ import 'subscription_nodes_provider.dart';
 export 'vpn_controller.dart';
 
 final vpnRepositoryProvider = Provider<VpnRepository>((ref) {
-  return VpnRepositoryImpl(
+  final repository = VpnRepositoryImpl(
     ref.read(apiServiceProvider),
     selectedNode: () => ref.read(selectedSubscriptionNodeProvider),
     availableNodes: () =>
         ref.read(subscriptionNodesProvider).valueOrNull ?? const [],
     onNodeSelected: (node) =>
         ref.read(selectedSubscriptionNodeProvider.notifier).state = node,
+    allowNodeFallback: () =>
+        ref.read(nodeSelectionModeProvider) == NodeSelectionMode.smart,
   );
+  ref.onDispose(repository.dispose);
+  return repository;
 }, name: 'vpnRepository');

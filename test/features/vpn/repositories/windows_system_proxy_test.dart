@@ -2,74 +2,111 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:vpn_app/features/vpn/repositories/vpn_repository_impl.dart';
 
 void main() {
-  group('windowsProxyEnabledFromRegistry', () {
-    test('reads disabled ProxyEnable value', () {
+  group('DesktopHealthTracker', () {
+    test('fails only after three consecutive local health misses', () {
+      final tracker = DesktopHealthTracker();
+
       expect(
-        windowsProxyEnabledFromRegistry(_proxyEnableOutput('0x0')),
-        isFalse,
+        tracker.recordLocalAvailability(false),
+        DesktopHealthDisposition.degraded,
       );
+      expect(
+        tracker.recordLocalAvailability(false),
+        DesktopHealthDisposition.degraded,
+      );
+      expect(tracker.localFailureCount, 2);
+      expect(
+        tracker.recordLocalAvailability(false),
+        DesktopHealthDisposition.failed,
+      );
+      expect(tracker.localFailureCount, 3);
     });
 
-    test('reads enabled ProxyEnable value', () {
+    test('a healthy local cycle resets the consecutive failure count', () {
+      final tracker = DesktopHealthTracker();
+
+      tracker.recordLocalAvailability(false);
+      tracker.recordLocalAvailability(false);
       expect(
-        windowsProxyEnabledFromRegistry(_proxyEnableOutput('0x1')),
-        isTrue,
+        tracker.recordLocalAvailability(true),
+        DesktopHealthDisposition.healthy,
       );
+      expect(tracker.localFailureCount, 0);
+      expect(
+        tracker.recordLocalAvailability(false),
+        DesktopHealthDisposition.degraded,
+      );
+      expect(tracker.localFailureCount, 1);
+    });
+
+    test('upstream probe misses stay degraded and recovery clears them', () {
+      final tracker = DesktopHealthTracker();
+
+      for (var index = 0; index < 10; index++) {
+        expect(
+          tracker.recordUpstreamReachability(false),
+          DesktopHealthDisposition.degraded,
+        );
+      }
+      expect(tracker.upstreamFailureCount, 10);
+      expect(
+        tracker.recordUpstreamReachability(true),
+        DesktopHealthDisposition.healthy,
+      );
+      expect(tracker.upstreamFailureCount, 0);
+    });
+
+    test('reset clears local and upstream degraded state', () {
+      final tracker = DesktopHealthTracker();
+      tracker.recordLocalAvailability(false);
+      tracker.recordUpstreamReachability(false);
+
+      tracker.reset();
+
+      expect(tracker.localFailureCount, 0);
+      expect(tracker.upstreamFailureCount, 0);
     });
   });
 
-  group('windowsSystemProxyEnabledFromRegistry', () {
-    test('is false when ProxyEnable is zero but the core address remains', () {
+  group('windowsProxyServerUsesLocalCore', () {
+    test('accepts the exact local core endpoint', () {
+      expect(windowsProxyServerUsesLocalCore('127.0.0.1:7890'), isTrue);
+      expect(windowsProxyServerUsesLocalCore('localhost:7890'), isTrue);
+    });
+
+    test('accepts a multi-protocol local core endpoint', () {
       expect(
-        windowsSystemProxyEnabledFromRegistry(
-          _proxyEnableOutput('0x0'),
-          _proxyServerOutput('127.0.0.1:7890'),
+        windowsProxyServerUsesLocalCore(
+          'http=127.0.0.1:7890;https=127.0.0.1:7890;'
+          'socks=127.0.0.1:7890',
+        ),
+        isTrue,
+      );
+    });
+
+    test('rejects another system proxy', () {
+      expect(
+        windowsProxyServerUsesLocalCore('proxy.example.com:8080'),
+        isFalse,
+      );
+    });
+
+    test('does not accept the local endpoint as a substring', () {
+      expect(
+        windowsProxyServerUsesLocalCore(
+          'proxy.example.com:8080/127.0.0.1:7890',
         ),
         isFalse,
       );
     });
 
-    test('is true for enabled core proxy address', () {
+    test('does not accept a mixed proxy owned by another app', () {
       expect(
-        windowsSystemProxyEnabledFromRegistry(
-          _proxyEnableOutput('0x1'),
-          _proxyServerOutput('127.0.0.1:7890'),
-        ),
-        isTrue,
-      );
-    });
-
-    test('is true when a multi-protocol proxy uses the core address', () {
-      expect(
-        windowsSystemProxyEnabledFromRegistry(
-          _proxyEnableOutput('0x1'),
-          _proxyServerOutput(
-            'http=127.0.0.1:7890;https=127.0.0.1:7890;'
-            'socks=127.0.0.1:7890',
-          ),
-        ),
-        isTrue,
-      );
-    });
-
-    test('is false when another system proxy is enabled', () {
-      expect(
-        windowsSystemProxyEnabledFromRegistry(
-          _proxyEnableOutput('0x1'),
-          _proxyServerOutput('proxy.example.com:8080'),
+        windowsProxyServerUsesLocalCore(
+          'http=127.0.0.1:7890;https=proxy.example.com:8080',
         ),
         isFalse,
       );
     });
   });
 }
-
-String _proxyEnableOutput(String value) =>
-    'HKEY_CURRENT_USER\\Software\\Microsoft\\Windows\\CurrentVersion\\'
-    'Internet Settings\r\n'
-    '    ProxyEnable    REG_DWORD    $value\r\n';
-
-String _proxyServerOutput(String value) =>
-    'HKEY_CURRENT_USER\\Software\\Microsoft\\Windows\\CurrentVersion\\'
-    'Internet Settings\r\n'
-    '    ProxyServer    REG_SZ    $value\r\n';
