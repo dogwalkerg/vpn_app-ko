@@ -265,99 +265,72 @@ void main() {
         MobileHealthDisposition.failed,
       );
     });
+  });
 
+  group('iOS NetworkExtension connection policy', () {
     test(
-      'iOS runtime remains usable while only the public probe is degraded',
+      'system CONNECTED remains authoritative while App Group data lags',
       () {
         final snapshot = IosTunnelSnapshot.fromMap({
           'state': 'CONNECTED',
-          'session': {'sessionId': 'ios-session-a', 'running': true},
-          'health': {
-            'sessionId': 'ios-session-a',
-            'healthy': false,
-            'xrayRunning': true,
-            'hevRunning': true,
-            'socksInboundReady': true,
-            'providerHttpStatusCode': 204,
-            'httpStatusCode': null,
-            'failureReason': 'System probe timed out',
-          },
+          'session': {'sessionId': 'native-session', 'running': false},
         });
 
-        expect(snapshot.health?.runtimeReady, isTrue);
-        expect(snapshot.health?.hasExactHttp204, isFalse);
-        expect(
-          iosTunnelSnapshotIsRuntimeReady(
-            snapshot,
-            expectedSessionId: 'ios-session-a',
-          ),
-          isTrue,
-        );
+        expect(iosTunnelSnapshotHasConnectedSystemState(snapshot), isTrue);
+        expect(snapshot.running, isFalse);
+        expect(snapshot.health, isNull);
       },
     );
 
-    test('iOS runtime rejects local component and session failures', () {
-      IosTunnelSnapshot snapshot({
-        bool xray = true,
-        bool hev = true,
-        bool socks = true,
-        String state = 'CONNECTED',
-        bool running = true,
-        String? sessionId = 'actual',
-        String? healthSessionId = 'actual',
-      }) => IosTunnelSnapshot.fromMap({
-        'state': state,
-        'session': {
-          if (sessionId != null) 'sessionId': sessionId,
-          'running': running,
-        },
-        'health': {
-          if (healthSessionId != null) 'sessionId': healthSessionId,
-          'healthy': false,
-          'xrayRunning': xray,
-          'hevRunning': hev,
-          'socksInboundReady': socks,
-        },
-      });
+    test('non-connected NetworkExtension states are rejected', () {
+      for (final state in const [
+        'CONNECTING',
+        'DISCONNECTING',
+        'DISCONNECTED',
+        'UNKNOWN',
+      ]) {
+        expect(
+          iosTunnelSnapshotHasConnectedSystemState(
+            IosTunnelSnapshot.fromMap({'state': state}),
+          ),
+          isFalse,
+          reason: state,
+        );
+      }
+    });
 
-      expect(iosTunnelSnapshotIsRuntimeReady(snapshot(xray: false)), isFalse);
-      expect(iosTunnelSnapshotIsRuntimeReady(snapshot(hev: false)), isFalse);
-      expect(iosTunnelSnapshotIsRuntimeReady(snapshot(socks: false)), isFalse);
-      expect(
-        iosTunnelSnapshotIsRuntimeReady(snapshot(state: 'DISCONNECTED')),
-        isFalse,
+    test('CONNECTED startup cannot reintroduce a fatal snapshot gate', () {
+      final source = File(
+        'lib/features/vpn/repositories/vpn_repository_impl.dart',
+      ).readAsStringSync();
+      final start = source.indexOf('Future<void> _connectIosVless(');
+      final end = source.indexOf(
+        'Future<void> _connectIosWithFallback(',
+        start,
       );
-      expect(
-        iosTunnelSnapshotIsRuntimeReady(snapshot(running: false)),
-        isFalse,
+
+      expect(start, greaterThanOrEqualTo(0));
+      expect(end, greaterThan(start));
+      final connectBlock = source.substring(start, end);
+      expect(connectBlock, isNot(contains('_verifyIosTunnel')));
+      expect(connectBlock, isNot(contains('节点已连接但无法访问互联网')));
+    });
+
+    test('Dart mobile health monitor is Android-only', () {
+      final source = File(
+        'lib/features/vpn/repositories/vpn_repository_impl.dart',
+      ).readAsStringSync();
+      final start = source.indexOf('void _startMobileHealthMonitor()');
+      final end = source.indexOf(
+        'Future<void>? _cancelMobileHealthMonitor()',
+        start,
       );
+
+      expect(start, greaterThanOrEqualTo(0));
+      expect(end, greaterThan(start));
       expect(
-        iosTunnelSnapshotIsRuntimeReady(
-          snapshot(),
-          expectedSessionId: 'stale-session',
-        ),
-        isFalse,
-      );
-      expect(
-        iosTunnelSnapshotIsRuntimeReady(
-          snapshot(sessionId: 'expected', healthSessionId: 'stale-health'),
-          expectedSessionId: 'expected',
-        ),
-        isFalse,
-      );
-      expect(
-        iosTunnelSnapshotIsRuntimeReady(
-          snapshot(sessionId: 'stale-session', healthSessionId: 'expected'),
-          expectedSessionId: 'expected',
-        ),
-        isFalse,
-      );
-      expect(
-        iosTunnelSnapshotIsRuntimeReady(
-          snapshot(sessionId: null, healthSessionId: null),
-          expectedSessionId: 'expected',
-        ),
-        isFalse,
+        source.substring(start, end),
+        contains('if (!Platform.isAndroid) return;'),
       );
     });
   });

@@ -324,7 +324,7 @@ Write-Output $pids[0]
     if (Platform.isIOS) {
       await _ensureIosVlessInitialized();
       final snapshot = await _iosVless!.getTunnelSnapshot();
-      _iosVlessConnected = snapshot.state == 'CONNECTED' && snapshot.running;
+      _iosVlessConnected = iosTunnelSnapshotHasConnectedSystemState(snapshot);
       if (snapshot.sessionId != null) {
         _iosVlessTrafficSessionId = snapshot.sessionId;
       }
@@ -337,11 +337,7 @@ Write-Output $pids[0]
             sessionId: _iosVlessTrafficSessionId,
           ),
         );
-        if (await _verifyIosTunnel()) {
-          _startMobileHealthMonitor();
-          return true;
-        }
-        await _stopIosVlessAndWait();
+        return true;
       }
       return false;
     }
@@ -543,11 +539,6 @@ Write-Output $pids[0]
       await _stopIosVlessAndWait();
       throw Exception('iOS 代理内核启动超时，请刷新订阅或更换节点');
     }
-    if (!await _verifyIosTunnel()) {
-      await _stopIosVlessAndWait();
-      throw Exception('节点已连接但无法访问互联网，请刷新订阅或更换节点');
-    }
-    _startMobileHealthMonitor();
   }
 
   Future<void> _connectIosWithFallback(
@@ -612,25 +603,6 @@ Write-Output $pids[0]
       }
       if (identical(_iosVlessStopped, stopped)) _iosVlessStopped = null;
     }
-  }
-
-  Future<bool> _verifyIosTunnel() async {
-    if (!Platform.isIOS || !_iosVlessConnected) return false;
-    for (var attempt = 0; attempt < 3; attempt++) {
-      try {
-        final snapshot = await _iosVless!.getTunnelSnapshot();
-        if (iosTunnelSnapshotIsRuntimeReady(
-          snapshot,
-          expectedSessionId: _iosVlessTrafficSessionId,
-        )) {
-          return true;
-        }
-      } catch (_) {}
-      if (attempt < 2) {
-        await Future.delayed(const Duration(milliseconds: 250));
-      }
-    }
-    return false;
   }
 
   Future<void> _stopV2rayAndWait({
@@ -731,7 +703,7 @@ Write-Output $pids[0]
   }
 
   void _startMobileHealthMonitor() {
-    if (!Platform.isAndroid && !Platform.isIOS) return;
+    if (!Platform.isAndroid) return;
     _cancelMobileHealthMonitor();
     final generation = _mobileHealthGeneration;
     _mobileConsecutiveProbeFailures = 0;
@@ -758,38 +730,19 @@ Write-Output $pids[0]
   }
 
   Future<void> _checkMobileHealth(int generation) async {
+    if (generation != _mobileHealthGeneration || !Platform.isAndroid) return;
+    await _ensureAndroidV2rayInitialized();
+    final status = await _v2ray!.getV2RayStatus();
     if (generation != _mobileHealthGeneration) return;
-    var disposition = MobileHealthDisposition.failed;
-    String reason;
-    if (Platform.isAndroid) {
-      await _ensureAndroidV2rayInitialized();
-      final status = await _v2ray!.getV2RayStatus();
-      if (generation != _mobileHealthGeneration) return;
-      _handleAndroidV2rayStatus(status);
-      final runtimeReady = _v2rayConnected;
-      disposition = classifyMobileHealth(
-        runtimeReady: runtimeReady,
-        publicReachable: runtimeReady && await _verifyAndroidProxy(),
-      );
-      reason = status.error.isEmpty ? '当前节点已无法访问网络，请更换节点后重新连接' : status.error;
-    } else {
-      ios_vless.IosTunnelSnapshot? snapshot;
-      try {
-        snapshot = await _iosVless!.getTunnelSnapshot();
-      } catch (_) {}
-      final runtimeReady =
-          _iosVlessConnected &&
-          snapshot != null &&
-          iosTunnelSnapshotIsRuntimeReady(
-            snapshot,
-            expectedSessionId: _iosVlessTrafficSessionId,
-          );
-      disposition = classifyMobileHealth(
-        runtimeReady: runtimeReady,
-        publicReachable: snapshot?.health?.healthy == true,
-      );
-      reason = snapshot?.health?.failureReason ?? '当前节点已无法访问网络，请更换节点后重新连接';
-    }
+    _handleAndroidV2rayStatus(status);
+    final runtimeReady = _v2rayConnected;
+    final disposition = classifyMobileHealth(
+      runtimeReady: runtimeReady,
+      publicReachable: runtimeReady && await _verifyAndroidProxy(),
+    );
+    final reason = status.error.isEmpty
+        ? '当前节点已无法访问网络，请更换节点后重新连接'
+        : status.error;
     if (generation != _mobileHealthGeneration) return;
     if (disposition != MobileHealthDisposition.failed) {
       _mobileConsecutiveProbeFailures = 0;
@@ -800,11 +753,7 @@ Write-Output $pids[0]
 
     _cancelMobileHealthMonitor();
     try {
-      if (Platform.isAndroid) {
-        await _stopV2rayAndWait();
-      } else {
-        await _stopIosVlessAndWait();
-      }
+      await _stopV2rayAndWait();
     } catch (_) {}
     _vpn.report(VpnStatusEvent(stage: VpnStage.disconnected, reason: reason));
   }
@@ -2002,24 +1951,6 @@ MobileHealthDisposition classifyMobileHealth({
       : MobileHealthDisposition.degraded;
 }
 
-bool iosTunnelSnapshotIsRuntimeReady(
-  ios_vless.IosTunnelSnapshot snapshot, {
-  String? expectedSessionId,
-}) {
-  final health = snapshot.health;
-  if (snapshot.state.toUpperCase() != 'CONNECTED' ||
-      !snapshot.running ||
-      health == null ||
-      !health.runtimeReady) {
-    return false;
-  }
-  final expected = expectedSessionId?.trim();
-  if (expected == null || expected.isEmpty) return true;
-  final nativeSessionIds = [snapshot.sessionId, health.sessionId]
-      .map((value) => value?.trim())
-      .whereType<String>()
-      .where((value) => value.isNotEmpty)
-      .toList(growable: false);
-  return nativeSessionIds.isNotEmpty &&
-      nativeSessionIds.every((value) => value == expected);
-}
+bool iosTunnelSnapshotHasConnectedSystemState(
+  ios_vless.IosTunnelSnapshot snapshot,
+) => snapshot.state.toUpperCase() == 'CONNECTED';
