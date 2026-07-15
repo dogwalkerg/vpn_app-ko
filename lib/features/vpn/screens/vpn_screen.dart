@@ -1,8 +1,10 @@
 import 'dart:async';
+import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+import 'package:window_manager/window_manager.dart';
 import 'package:vpn_app/core/api/coco_api.dart';
 import 'package:vpn_app/core/router/routes.dart';
 import 'package:vpn_app/features/auth/providers/auth_providers.dart';
@@ -17,7 +19,13 @@ import 'package:vpn_app/ui/widgets/app_custom_appbar.dart';
 import 'package:vpn_app/ui/widgets/themed_scaffold.dart';
 import 'package:vpn_app/ui/widgets/app_snackbar.dart';
 
+const subscriptionAutoRefreshInterval = Duration(hours: 1);
 const _lineQualityLabel = '线路质量：★★★★★';
+
+bool shouldRunAutomaticSubscriptionRefresh({
+  required bool appIsForeground,
+  required bool desktopWindowVisible,
+}) => appIsForeground && desktopWindowVisible;
 
 class VpnScreen extends ConsumerStatefulWidget {
   const VpnScreen({super.key});
@@ -26,9 +34,11 @@ class VpnScreen extends ConsumerStatefulWidget {
   ConsumerState<VpnScreen> createState() => _VpnScreenState();
 }
 
-class _VpnScreenState extends ConsumerState<VpnScreen> {
+class _VpnScreenState extends ConsumerState<VpnScreen>
+    with WidgetsBindingObserver, WindowListener {
   Timer? _timer;
   Timer? _subscriptionRefreshTimer;
+  bool _appIsForeground = true;
   int _tabIndex = 0;
   DateTime? _connectedAt;
   Duration _connectedFor = Duration.zero;
@@ -36,17 +46,74 @@ class _VpnScreenState extends ConsumerState<VpnScreen> {
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
+    if (Platform.isWindows || Platform.isMacOS) {
+      windowManager.addListener(this);
+    }
+    final lifecycleState = WidgetsBinding.instance.lifecycleState;
+    _appIsForeground =
+        lifecycleState == null || lifecycleState == AppLifecycleState.resumed;
     _subscriptionRefreshTimer = Timer.periodic(
-      const Duration(minutes: 1),
-      (_) => _refreshNodes(showFeedback: false),
+      subscriptionAutoRefreshInterval,
+      (_) => unawaited(_runAutomaticSubscriptionRefresh()),
     );
   }
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    if (Platform.isWindows || Platform.isMacOS) {
+      windowManager.removeListener(this);
+    }
     _timer?.cancel();
     _subscriptionRefreshTimer?.cancel();
     super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    _appIsForeground = state == AppLifecycleState.resumed;
+    if (_appIsForeground) {
+      unawaited(_runAutomaticSubscriptionRefresh());
+    }
+  }
+
+  @override
+  void onWindowFocus() {
+    unawaited(_runAutomaticSubscriptionRefresh());
+  }
+
+  Future<void> _runAutomaticSubscriptionRefresh() async {
+    if (!mounted ||
+        !shouldRunAutomaticSubscriptionRefresh(
+          appIsForeground: _appIsForeground,
+          desktopWindowVisible: true,
+        )) {
+      return;
+    }
+    var desktopWindowVisible = true;
+    if (Platform.isWindows || Platform.isMacOS) {
+      try {
+        desktopWindowVisible = await windowManager.isVisible();
+      } catch (_) {
+        // A visible desktop app can continue even if the plugin is unavailable.
+      }
+    }
+    if (!mounted ||
+        !shouldRunAutomaticSubscriptionRefresh(
+          appIsForeground: _appIsForeground,
+          desktopWindowVisible: desktopWindowVisible,
+        )) {
+      return;
+    }
+    try {
+      final refreshed = await ref
+          .read(subscriptionNodesRefreshControllerProvider.notifier)
+          .refreshNodesIfDue();
+      if (refreshed && mounted) await _refreshSmartSelectionWhenIdle(ref);
+    } catch (_) {
+      // Automatic refresh is retried on the next foreground/timer event.
+    }
   }
 
   Future<void> _refreshNodes({bool showFeedback = true}) async {

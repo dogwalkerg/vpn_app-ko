@@ -150,6 +150,16 @@ NodeSelectionMode _initialSelectionMode(Ref ref) {
 }
 
 final subscriptionNodesRevisionProvider = StateProvider<int>((ref) => 0);
+final subscriptionNodesLastRefreshProvider = StateProvider<DateTime?>(
+  (ref) => null,
+);
+
+bool isSubscriptionNodesRefreshDue({
+  required DateTime? lastRefreshAt,
+  required DateTime now,
+  Duration maxAge = const Duration(hours: 1),
+}) => lastRefreshAt == null || now.difference(lastRefreshAt) >= maxAge;
+
 final subscriptionNodesRefreshControllerProvider =
     StateNotifierProvider<SubscriptionNodesRefreshController, bool>(
       SubscriptionNodesRefreshController.new,
@@ -225,12 +235,22 @@ Future<SubscriptionNode?> selectLowestLatencyNode({
 final subscriptionNodesProvider = FutureProvider<List<SubscriptionNode>>((
   ref,
 ) async {
-  final subState = ref.watch(subscriptionControllerProvider);
-  if (subState is! SubscriptionReady || !subState.status.canUse) {
+  final source = ref.watch(
+    subscriptionControllerProvider.select((subState) {
+      if (subState is! SubscriptionReady) {
+        return (canUse: false, subUrl: '');
+      }
+      return (
+        canUse: subState.status.canUse,
+        subUrl: subState.status.subUrl.trim(),
+      );
+    }),
+  );
+  if (!source.canUse) {
     return const [];
   }
 
-  final subUrl = subState.status.subUrl.trim();
+  final subUrl = source.subUrl;
   final text = subUrl.isEmpty || _isBackendSubscriptionUrl(subUrl)
       ? await ref.read(cocoApiProvider).subscriptionText()
       : (await Dio(
@@ -251,6 +271,8 @@ final subscriptionNodesProvider = FutureProvider<List<SubscriptionNode>>((
                 .data ??
             '';
   final nodes = parseSubscriptionNodes(text);
+  ref.read(subscriptionNodesLastRefreshProvider.notifier).state =
+      DateTime.now();
   ref.read(subscriptionNodesRevisionProvider.notifier).state++;
   final selected = ref.read(selectedSubscriptionNodeProvider);
   final smartSelection =
@@ -281,24 +303,66 @@ bool _isBackendSubscriptionUrl(String value) {
 Future<void> refreshSubscriptionNodes(WidgetRef ref) =>
     ref.read(subscriptionNodesRefreshControllerProvider.notifier).refresh();
 
+typedef ForceSubscriptionNodesRefresh = Future<void> Function();
+
+final forceSubscriptionNodesRefreshProvider =
+    Provider<ForceSubscriptionNodesRefresh>((ref) {
+      return ref
+          .read(subscriptionNodesRefreshControllerProvider.notifier)
+          .refresh;
+    }, name: 'forceSubscriptionNodesRefresh');
+
 class SubscriptionNodesRefreshController extends StateNotifier<bool> {
   SubscriptionNodesRefreshController(this.ref) : super(false);
 
   final Ref ref;
   Future<void>? _activeRefresh;
+  bool _activeRefreshIncludesAccount = false;
+  DateTime? _lastAutomaticRefreshAttemptAt;
+
+  static const automaticRetryCooldown = Duration(minutes: 5);
 
   Future<void>? get activeRefresh => _activeRefresh;
 
-  Future<void> refresh() {
+  Future<void> refresh() => _refresh(refreshAccount: true);
+
+  Future<bool> refreshNodesIfDue({DateTime? now}) async {
     final active = _activeRefresh;
-    if (active != null) return active;
+    if (active != null) {
+      await active;
+      return true;
+    }
+    final checkedAt = now ?? DateTime.now();
+    final due = isSubscriptionNodesRefreshDue(
+      lastRefreshAt: ref.read(subscriptionNodesLastRefreshProvider),
+      now: checkedAt,
+    );
+    if (!due) return false;
+    final lastAttempt = _lastAutomaticRefreshAttemptAt;
+    if (lastAttempt != null &&
+        checkedAt.difference(lastAttempt) < automaticRetryCooldown) {
+      return false;
+    }
+    _lastAutomaticRefreshAttemptAt = checkedAt;
+    await _refresh(refreshAccount: false);
+    return true;
+  }
+
+  Future<void> _refresh({required bool refreshAccount}) {
+    final active = _activeRefresh;
+    if (active != null) {
+      if (!refreshAccount || _activeRefreshIncludesAccount) return active;
+      return active.then((_) => _refresh(refreshAccount: true));
+    }
 
     state = true;
+    _activeRefreshIncludesAccount = refreshAccount;
     ref.read(subscriptionNodesRevisionProvider.notifier).state++;
     late final Future<void> future;
-    future = _performRefresh().whenComplete(() {
+    future = _performRefresh(refreshAccount: refreshAccount).whenComplete(() {
       if (identical(_activeRefresh, future)) {
         _activeRefresh = null;
+        _activeRefreshIncludesAccount = false;
         if (mounted) state = false;
       }
     });
@@ -306,12 +370,13 @@ class SubscriptionNodesRefreshController extends StateNotifier<bool> {
     return future;
   }
 
-  Future<void> _performRefresh() async {
-    await ref
-        .read(subscriptionControllerProvider.notifier)
-        .fetch(forceRefresh: true);
-    ref.invalidate(subscriptionNodesProvider);
-    await ref.read(subscriptionNodesProvider.future);
+  Future<void> _performRefresh({required bool refreshAccount}) async {
+    if (refreshAccount) {
+      await ref
+          .read(subscriptionControllerProvider.notifier)
+          .fetch(forceRefresh: true);
+    }
+    final _ = await ref.refresh(subscriptionNodesProvider.future);
   }
 }
 

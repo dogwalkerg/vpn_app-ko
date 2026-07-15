@@ -127,6 +127,9 @@ class _FakeSubscriptionRepository implements SubscriptionRepository {
     required int total,
     required int used,
     bool? canUse,
+    String? paidUntil,
+    String? subUrl,
+    String? updatedAt,
   }) async {
     _cached = _cached?.copyWith(
       trafficTotal: total,
@@ -169,6 +172,9 @@ class _PendingFetchSubscriptionRepository implements SubscriptionRepository {
     required int total,
     required int used,
     bool? canUse,
+    String? paidUntil,
+    String? subUrl,
+    String? updatedAt,
   }) async => null;
 
   @override

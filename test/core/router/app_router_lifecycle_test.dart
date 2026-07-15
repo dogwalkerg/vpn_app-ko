@@ -265,6 +265,9 @@ class _StubSubscriptionRepository implements SubscriptionRepository {
     required int total,
     required int used,
     bool? canUse,
+    String? paidUntil,
+    String? subUrl,
+    String? updatedAt,
   }) async => status;
 
   @override

@@ -79,11 +79,17 @@ class SubscriptionController extends StateNotifier<SubscriptionState> {
     required int total,
     required int used,
     bool? canUse,
+    String? paidUntil,
+    String? subUrl,
+    String? updatedAt,
   }) async {
     final updated = await _repo.applyTrafficSnapshot(
       total: total,
       used: used,
       canUse: canUse,
+      paidUntil: paidUntil,
+      subUrl: subUrl,
+      updatedAt: updatedAt,
     );
     if (mounted && updated != null) {
       state = SubscriptionReady(updated);

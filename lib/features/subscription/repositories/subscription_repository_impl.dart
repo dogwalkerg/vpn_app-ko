@@ -20,6 +20,7 @@ class SubscriptionRepositoryImpl implements SubscriptionRepository {
   }) : _entry = swr.register<SubscriptionStatus?>(
          key: SwrKeys.subscription,
          ttl: ttl,
+         revalidateOnResume: false,
          fetcher: () async {
            final data = _toStatusMap(await CocoApi(api).userInfo());
            // Сохраним снапшот
@@ -58,15 +59,34 @@ class SubscriptionRepositoryImpl implements SubscriptionRepository {
       final data = _toStatusMap(
         await CocoApi(api).userInfo(cancelToken: cancelToken),
       );
-      final fresh = subscriptionStatusFromMap(data);
+      var fresh = subscriptionStatusFromMap(data);
 
       if (revision != _cacheRevision) {
-        return getCached() ?? fresh;
+        final current = getCached();
+        if (current != null) {
+          final freshUpdatedAt = DateTime.tryParse(fresh.updatedAt ?? '');
+          final currentUpdatedAt = DateTime.tryParse(current.updatedAt ?? '');
+          final freshIsOlder =
+              currentUpdatedAt != null &&
+              (freshUpdatedAt == null ||
+                  freshUpdatedAt.isBefore(currentUpdatedAt));
+          if (freshIsOlder) return current;
+          final used = fresh.trafficUsed > current.trafficUsed
+              ? fresh.trafficUsed
+              : current.trafficUsed;
+          fresh = fresh.copyWith(
+            trafficUsed: used,
+            canUse:
+                fresh.canUse &&
+                fresh.trafficTotal > 0 &&
+                used < fresh.trafficTotal,
+          );
+        }
       }
 
       // кладём свежие данные и снапшот
       _entry.setOptimistic(fresh);
-      unawaited(DiskCache.putJson(SwrKeys.subscription, data));
+      unawaited(DiskCache.putJson(SwrKeys.subscription, _statusToMap(fresh)));
       return fresh;
     } on DioException catch (e) {
       throw mapDioError(e);
@@ -78,6 +98,9 @@ class SubscriptionRepositoryImpl implements SubscriptionRepository {
     required int total,
     required int used,
     bool? canUse,
+    String? paidUntil,
+    String? subUrl,
+    String? updatedAt,
   }) async {
     final current = getCached();
     if (current == null) return null;
@@ -86,6 +109,9 @@ class SubscriptionRepositoryImpl implements SubscriptionRepository {
       trafficTotal: total,
       trafficUsed: used,
       canUse: canUse,
+      paidUntil: paidUntil,
+      subUrl: subUrl,
+      updatedAt: updatedAt,
     );
     await _persist(updated);
     return updated;
@@ -130,6 +156,7 @@ Map<String, dynamic> _toStatusMap(CocoUserInfo user) => {
   'traffic_total': user.trafficTotal,
   'traffic_used': user.trafficUsed,
   'level': user.level,
+  'updated_at': user.updatedAt?.toIso8601String(),
 };
 
 Map<String, dynamic> _statusToMap(SubscriptionStatus status) => {
@@ -145,4 +172,5 @@ Map<String, dynamic> _statusToMap(SubscriptionStatus status) => {
   'traffic_total': status.trafficTotal,
   'traffic_used': status.trafficUsed,
   'level': status.level,
+  'updated_at': status.updatedAt,
 };

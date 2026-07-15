@@ -88,6 +88,7 @@ void main() {
     container = ProviderContainer(
       overrides: [
         vpnAccessProvider.overrideWithValue(true),
+        forceSubscriptionNodesRefreshProvider.overrideWithValue(() async {}),
         subscriptionNodesProvider.overrideWith((ref) async => nodes),
         selectedSubscriptionNodeProvider.overrideWith((ref) => nodes.first),
         nodeLatencyProbeProvider.overrideWithValue(
@@ -147,6 +148,82 @@ void main() {
     expect(disconnectCalls, 1);
     expect(controller.state, isA<VpnIdle>());
   });
+
+  test(
+    'connection waits for a fresh account and subscription snapshot',
+    () async {
+      final refreshStarted = Completer<void>();
+      final releaseRefresh = Completer<void>();
+      var connectCalls = 0;
+      final container = ProviderContainer(
+        overrides: [
+          vpnAccessProvider.overrideWithValue(true),
+          forceSubscriptionNodesRefreshProvider.overrideWithValue(() async {
+            refreshStarted.complete();
+            await releaseRefresh.future;
+          }),
+          connectVpnUseCaseProvider.overrideWithValue(
+            () async => connectCalls++,
+          ),
+          disconnectVpnUseCaseProvider.overrideWithValue(() async {}),
+          isVpnConnectedUseCaseProvider.overrideWithValue(() async => false),
+        ],
+      );
+      addTearDown(container.dispose);
+      final controller = container.read(vpnControllerProvider.notifier);
+      await _settleBootstrap();
+
+      final attempt = controller.connectPressed();
+      await refreshStarted.future;
+      expect(controller.state, isA<VpnConnecting>());
+      expect(connectCalls, 0);
+
+      releaseRefresh.complete();
+      await attempt;
+      expect(connectCalls, 1);
+      expect(controller.state, isA<VpnConnected>());
+    },
+  );
+
+  test(
+    'disconnect during connection preflight prevents the core from starting',
+    () async {
+      final refreshStarted = Completer<void>();
+      final releaseRefresh = Completer<void>();
+      var connectCalls = 0;
+      var disconnectCalls = 0;
+      final container = ProviderContainer(
+        overrides: [
+          vpnAccessProvider.overrideWithValue(true),
+          forceSubscriptionNodesRefreshProvider.overrideWithValue(() async {
+            refreshStarted.complete();
+            await releaseRefresh.future;
+          }),
+          connectVpnUseCaseProvider.overrideWithValue(
+            () async => connectCalls++,
+          ),
+          disconnectVpnUseCaseProvider.overrideWithValue(
+            () async => disconnectCalls++,
+          ),
+          isVpnConnectedUseCaseProvider.overrideWithValue(() async => false),
+        ],
+      );
+      addTearDown(container.dispose);
+      final controller = container.read(vpnControllerProvider.notifier);
+      await _settleBootstrap();
+
+      final connectAttempt = controller.connectPressed();
+      await refreshStarted.future;
+      final disconnectAttempt = controller.forceDisconnect();
+      await disconnectAttempt;
+      releaseRefresh.complete();
+      await connectAttempt;
+
+      expect(connectCalls, 0);
+      expect(disconnectCalls, 1);
+      expect(controller.state, isA<VpnIdle>());
+    },
+  );
 }
 
 SubscriptionNode _node(String name, int port) => SubscriptionNode(
@@ -169,6 +246,7 @@ ProviderContainer _container({
   return ProviderContainer(
     overrides: [
       vpnAccessProvider.overrideWithValue(true),
+      forceSubscriptionNodesRefreshProvider.overrideWithValue(() async {}),
       connectVpnUseCaseProvider.overrideWithValue(connect),
       disconnectVpnUseCaseProvider.overrideWithValue(disconnect),
       isVpnConnectedUseCaseProvider.overrideWithValue(isConnected),

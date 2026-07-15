@@ -10,6 +10,9 @@ abstract class SubscriptionRepository {
     required int total,
     required int used,
     bool? canUse,
+    String? paidUntil,
+    String? subUrl,
+    String? updatedAt,
   });
   Future<SubscriptionStatus?> markBlocked();
   Future<void> clearCache();

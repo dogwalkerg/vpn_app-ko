@@ -70,8 +70,20 @@ class TrayManagerHandler with tray.TrayListener {
   }
 
   @override
-  void onTrayIconMouseDown() {
-    windowManager.show();
+  void onTrayIconMouseDown() async {
+    await _showWindowAndRefresh();
+  }
+
+  Future<void> _showWindowAndRefresh() async {
+    final context = rootNavigatorKey.currentContext;
+    final container = context == null
+        ? null
+        : ProviderScope.containerOf(context);
+    await windowManager.show();
+    if (container == null) return;
+    await container
+        .read(trafficAccountingProvider.notifier)
+        .resumeFromBackground();
   }
 
   @override
@@ -90,7 +102,7 @@ class TrayManagerHandler with tray.TrayListener {
 
     switch (menuItem.key) {
       case 'show_window':
-        windowManager.show();
+        await _showWindowAndRefresh();
         break;
       case 'connect':
         if (!isLoggedIn || isConnected || isConnecting) return;

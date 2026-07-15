@@ -13,6 +13,31 @@ import 'package:vpn_app/features/vpn/usecases/is_connected_usecase.dart';
 import 'package:vpn_app/ui/theme/light_theme.dart';
 
 void main() {
+  test('automatic subscription refresh uses the quota-safe interval', () {
+    expect(subscriptionAutoRefreshInterval, const Duration(hours: 1));
+    expect(
+      shouldRunAutomaticSubscriptionRefresh(
+        appIsForeground: false,
+        desktopWindowVisible: true,
+      ),
+      isFalse,
+    );
+    expect(
+      shouldRunAutomaticSubscriptionRefresh(
+        appIsForeground: true,
+        desktopWindowVisible: false,
+      ),
+      isFalse,
+    );
+    expect(
+      shouldRunAutomaticSubscriptionRefresh(
+        appIsForeground: true,
+        desktopWindowVisible: true,
+      ),
+      isTrue,
+    );
+  });
+
   const node = SubscriptionNode(
     name: 'CFB电信优选1',
     type: 'VLESS',

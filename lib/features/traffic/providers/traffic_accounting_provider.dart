@@ -9,6 +9,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:uuid/uuid.dart';
 import 'package:vpn_app/core/api/coco_api.dart';
 import 'package:vpn_app/features/auth/providers/auth_providers.dart';
+import 'package:vpn_app/features/subscription/models/subscription_state.dart';
 import 'package:vpn_app/features/subscription/providers/subscription_providers.dart';
 import 'package:vpn_app/features/traffic/models/traffic_accounting_state.dart';
 import 'package:vpn_app/features/vpn/platform/vpn_channel.dart';
@@ -26,6 +27,25 @@ final trafficAccountingProvider =
 final trafficFlushProvider = Provider<Future<bool> Function()>((ref) {
   return ref.read(trafficAccountingProvider.notifier).flush;
 }, name: 'trafficFlush');
+
+final trafficBatchCheckIntervalProvider = Provider<Duration>(
+  (_) => const Duration(seconds: 5),
+  name: 'trafficBatchCheckInterval',
+);
+final trafficRetryBackoffProvider = Provider<Duration>(
+  (_) => TrafficAccountingController.heartbeatInterval,
+  name: 'trafficRetryBackoff',
+);
+
+typedef _AccountMetadataBasis = ({
+  bool canUse,
+  String subUrl,
+  String? paidUntil,
+  int trafficTotal,
+  int trafficUsed,
+  int level,
+  String? updatedAt,
+});
 
 class TrafficAccountingController extends StateNotifier<TrafficAccountingState>
     with WidgetsBindingObserver {
@@ -47,9 +67,9 @@ class TrafficAccountingController extends StateNotifier<TrafficAccountingState>
     });
   }
 
-  static const reportThresholdBytes = 20 * 1024 * 1024;
-  static const reportInterval = Duration(minutes: 5);
-  static const heartbeatInterval = Duration(seconds: 30);
+  static const reportThresholdBytes = 100 * 1024 * 1024;
+  static const reportInterval = Duration(minutes: 15);
+  static const heartbeatInterval = Duration(minutes: 5);
 
   final Ref _ref;
   final CocoApi _api;
@@ -58,14 +78,21 @@ class TrafficAccountingController extends StateNotifier<TrafficAccountingState>
   Timer? _batchTimer;
   Timer? _desktopPollTimer;
   Future<void> _operationTail = Future<void>.value();
+  Future<bool>? _batchFlushFuture;
   bool _disposed = false;
   bool _desktopPollBusy = false;
   bool _enforcingRestriction = false;
+  bool _automaticFlushScheduled = false;
   int _pendingBytes = 0;
   _PendingTrafficBatch? _retryBatch;
+  _PendingTrafficBatch? _queuedBatch;
+  bool _retryBatchNeedsRetry = false;
+  DateTime? _nextRetryAt;
   String? _accountKey;
   Future<void> _restoreFuture = Future<void>.value();
   DateTime _lastBatchReportAt = DateTime.now();
+  DateTime? _lastAccountSyncAt;
+  DateTime? _lastAccountSyncAttemptAt;
   String? _nativeSessionId;
   int _lastNativeUpload = 0;
   int _lastNativeDownload = 0;
@@ -85,38 +112,55 @@ class TrafficAccountingController extends StateNotifier<TrafficAccountingState>
     if (previous != token) {
       _pendingBytes = 0;
       _retryBatch = null;
+      _queuedBatch = null;
+      _retryBatchNeedsRetry = false;
+      _nextRetryAt = null;
+      _lastAccountSyncAt = null;
+      _lastAccountSyncAttemptAt = null;
       _publishPending(syncing: false);
     }
     _accountKey = accountKey;
     _restoreFuture = _restorePendingBatch(accountKey);
     _startAccountChecks();
+    _updateHeartbeatTimer();
     if (previous != token) {
       _lastBatchReportAt = DateTime.now();
       unawaited(
         _restoreFuture.then((_) async {
           if (_retryBatch != null) await flush();
-          await heartbeat();
         }),
       );
     }
   }
 
   void _startAccountChecks() {
-    _heartbeatTimer ??= Timer.periodic(
-      heartbeatInterval,
-      (_) => unawaited(heartbeat()),
-    );
     _batchTimer ??= Timer.periodic(
-      const Duration(seconds: 5),
+      _ref.read(trafficBatchCheckIntervalProvider),
       (_) => unawaited(_onBatchTick()),
     );
   }
 
+  void _updateHeartbeatTimer() {
+    final shouldRun = _hasToken && state.connected;
+    if (!shouldRun) {
+      _heartbeatTimer?.cancel();
+      _heartbeatTimer = null;
+      return;
+    }
+    _heartbeatTimer ??= Timer.periodic(
+      heartbeatInterval,
+      (_) => unawaited(heartbeat()),
+    );
+  }
+
   Future<void> _onBatchTick() async {
+    if (_disposed) return;
     await _checkpointPending();
-    if (_displayPendingBytes > 0 &&
+    if (_disposed) return;
+    if (!state.connected || _displayPendingBytes <= 0) return;
+    if (_retryBatchNeedsRetry ||
         DateTime.now().difference(_lastBatchReportAt) >= reportInterval) {
-      await flush();
+      await _flushAutomaticallyIfDue();
     }
   }
 
@@ -153,6 +197,12 @@ class TrafficAccountingController extends StateNotifier<TrafficAccountingState>
       sessionDownloadBytes: 0,
       clearNotice: true,
     );
+    _updateHeartbeatTimer();
+    unawaited(
+      _restoreFuture.then((_) async {
+        if (_retryBatchNeedsRetry && state.connected) await _flushOneBatch();
+      }),
+    );
     if (Platform.isWindows || Platform.isMacOS) {
       _desktopPollTimer?.cancel();
       _desktopPollTimer = Timer.periodic(
@@ -171,6 +221,7 @@ class TrafficAccountingController extends StateNotifier<TrafficAccountingState>
       uploadBytesPerSecond: 0,
       downloadBytesPerSecond: 0,
     );
+    _updateHeartbeatTimer();
     unawaited(flush());
   }
 
@@ -280,13 +331,74 @@ class TrafficAccountingController extends StateNotifier<TrafficAccountingState>
       sessionDownloadBytes: state.sessionDownloadBytes + downloadDelta,
       pendingBytes: _displayPendingBytes,
     );
-    if (_displayPendingBytes >= reportThresholdBytes) unawaited(flush());
+    if (!_retryBatchNeedsRetry &&
+        _displayPendingBytes >= reportThresholdBytes) {
+      _scheduleAutomaticFlush();
+    }
+  }
+
+  void _scheduleAutomaticFlush() {
+    unawaited(_flushAutomaticallyIfDue());
+  }
+
+  Future<bool> _flushAutomaticallyIfDue() async {
+    if (_automaticFlushScheduled) return false;
+    final now = DateTime.now();
+    final pendingBytes = _displayPendingBytes;
+    if (!_retryBatchNeedsRetry &&
+        (pendingBytes <= 0 ||
+            (pendingBytes < reportThresholdBytes &&
+                now.difference(_lastBatchReportAt) < reportInterval))) {
+      return false;
+    }
+    final nextRetryAt = _nextRetryAt;
+    if (_retryBatchNeedsRetry &&
+        nextRetryAt != null &&
+        now.isBefore(nextRetryAt)) {
+      return false;
+    }
+    _automaticFlushScheduled = true;
+    if (_retryBatchNeedsRetry) {
+      _nextRetryAt = now.add(_ref.read(trafficRetryBackoffProvider));
+    }
+    try {
+      return await _flushOneBatch();
+    } finally {
+      _automaticFlushScheduled = false;
+    }
   }
 
   Future<void> _checkpointPending() {
     return _enqueue(() async {
       await _restoreFuture;
-      if (!_hasToken || _retryBatch != null || _pendingBytes <= 0) return;
+      if (_disposed) return;
+      if (!_hasToken || _pendingBytes <= 0) return;
+      final existing = _retryBatch;
+      if (existing != null) {
+        if (_retryBatchNeedsRetry) {
+          final queued = _queuedBatch;
+          final combined = _PendingTrafficBatch(
+            id: queued?.id ?? const Uuid().v4(),
+            bytes: (queued?.bytes ?? 0) + _pendingBytes,
+          );
+          if (await _persistPendingBatches(existing, combined)) {
+            _pendingBytes = 0;
+            _queuedBatch = combined;
+            _publishPending(syncing: false);
+          }
+          return;
+        }
+        final combined = _PendingTrafficBatch(
+          id: existing.id,
+          bytes: existing.bytes + _pendingBytes,
+        );
+        if (await _persistPendingBatch(combined)) {
+          _pendingBytes = 0;
+          _retryBatch = combined;
+          _publishPending(syncing: false);
+        }
+        return;
+      }
       final batch = _PendingTrafficBatch(
         id: const Uuid().v4(),
         bytes: _pendingBytes,
@@ -294,28 +406,99 @@ class TrafficAccountingController extends StateNotifier<TrafficAccountingState>
       if (await _persistPendingBatch(batch)) {
         _pendingBytes = 0;
         _retryBatch = batch;
+        _retryBatchNeedsRetry = false;
         _publishPending(syncing: false);
       }
     });
   }
 
-  Future<void> heartbeat() async {
+  Future<void> heartbeat({bool allowDisconnected = false}) async {
     await _restoreFuture;
-    if (_displayPendingBytes > 0 && !await flush()) return;
+    final now = DateTime.now();
+    final pendingBytes = _displayPendingBytes;
+    final pendingIsDue =
+        _retryBatchNeedsRetry ||
+        (pendingBytes > 0 &&
+            (pendingBytes >= reportThresholdBytes ||
+                now.difference(_lastBatchReportAt) >= reportInterval));
+    if (pendingIsDue) {
+      await _flushAutomaticallyIfDue();
+      return;
+    }
     if (state.restriction != null) return;
     await _enqueue(() async {
-      if (!_hasToken || _enforcingRestriction) return;
+      if (!_hasToken ||
+          (!state.connected && !allowDisconnected) ||
+          _enforcingRestriction) {
+        return;
+      }
+      final lastSync = _lastAccountSyncAt;
+      if (lastSync != null &&
+          DateTime.now().difference(lastSync) < heartbeatInterval) {
+        return;
+      }
+      final lastAttempt = _lastAccountSyncAttemptAt;
+      if (lastAttempt != null &&
+          DateTime.now().difference(lastAttempt) < heartbeatInterval) {
+        return;
+      }
       try {
+        final metadataBasis = _accountMetadataBasis;
+        final requestToken = _ref.read(tokenProvider);
+        _lastAccountSyncAttemptAt = DateTime.now();
         final report = await _api.reportTraffic(0);
-        await _applyReport(report);
+        await _applyReport(
+          report,
+          metadataBasis: metadataBasis,
+          requestToken: requestToken,
+        );
       } catch (_) {
         // Heartbeats are retried on the next interval.
       }
     });
   }
 
-  Future<bool> flush() async {
+  Future<void> resumeFromBackground() async {
+    if (!_hasToken) return;
+    await _restoreFuture;
+    if (_retryBatchNeedsRetry) await _flushAutomaticallyIfDue();
+    await heartbeat(allowDisconnected: true);
+    try {
+      await _ref
+          .read(subscriptionNodesRefreshControllerProvider.notifier)
+          .refreshNodesIfDue();
+    } catch (_) {}
+  }
+
+  Future<bool> flush() {
+    return _drainPendingTraffic();
+  }
+
+  Future<bool> _drainPendingTraffic() async {
     if ((Platform.isWindows || Platform.isMacOS) && state.connected) {
+      await _captureDesktopTrafficBeforeFlush();
+    }
+    while (_displayPendingBytes > 0) {
+      if (!await _flushOneBatch(captureDesktop: false)) return false;
+    }
+    return true;
+  }
+
+  Future<bool> _flushOneBatch({bool captureDesktop = true}) {
+    final active = _batchFlushFuture;
+    if (active != null) return active;
+    late final Future<bool> future;
+    future = _performFlush(captureDesktop: captureDesktop).whenComplete(() {
+      if (identical(_batchFlushFuture, future)) _batchFlushFuture = null;
+    });
+    _batchFlushFuture = future;
+    return future;
+  }
+
+  Future<bool> _performFlush({required bool captureDesktop}) async {
+    if (captureDesktop &&
+        (Platform.isWindows || Platform.isMacOS) &&
+        state.connected) {
       await _captureDesktopTrafficBeforeFlush();
     }
     var allReported = true;
@@ -326,45 +509,75 @@ class TrafficAccountingController extends StateNotifier<TrafficAccountingState>
         return;
       }
 
-      while (_retryBatch != null || _pendingBytes > 0) {
-        var batch = _retryBatch;
-        if (batch == null) {
-          batch = _PendingTrafficBatch(
-            id: const Uuid().v4(),
-            bytes: _pendingBytes,
-          );
-          if (!await _persistPendingBatch(batch)) {
-            allReported = false;
-            return;
-          }
-          _pendingBytes = 0;
-          _retryBatch = batch;
-        }
-
-        _publishPending(syncing: true);
-        late final CocoTrafficReport report;
-        try {
-          report = await _api.reportTraffic(batch.bytes, reportId: batch.id);
-        } catch (_) {
+      final existing = _retryBatch;
+      if (existing != null && !_retryBatchNeedsRetry && _pendingBytes > 0) {
+        final combined = _PendingTrafficBatch(
+          id: existing.id,
+          bytes: existing.bytes + _pendingBytes,
+        );
+        if (!await _persistPendingBatch(combined)) {
           allReported = false;
-          _publishPending(syncing: false);
           return;
         }
+        _pendingBytes = 0;
+        _retryBatch = combined;
+        _publishPending(syncing: false);
+      }
 
-        if (!await _removePendingBatch(batch)) {
+      var batch = _retryBatch;
+      if (batch == null && _pendingBytes > 0) {
+        batch = _PendingTrafficBatch(
+          id: const Uuid().v4(),
+          bytes: _pendingBytes,
+        );
+        if (!await _persistPendingBatch(batch)) {
           allReported = false;
-          _publishPending(syncing: false);
           return;
         }
-        _retryBatch = null;
-        _lastBatchReportAt = DateTime.now();
-        _publishPending(syncing: true);
-        try {
-          await _applyReport(report);
-        } finally {
-          _publishPending(syncing: false);
-        }
-        if (report.isRestricted) return;
+        _pendingBytes = 0;
+        _retryBatch = batch;
+      }
+      if (batch == null) return;
+
+      _publishPending(syncing: true);
+      late final CocoTrafficReport report;
+      final metadataBasis = _accountMetadataBasis;
+      final requestToken = _ref.read(tokenProvider);
+      try {
+        report = await _api.reportTraffic(batch.bytes, reportId: batch.id);
+      } catch (_) {
+        _retryBatchNeedsRetry = true;
+        _nextRetryAt = DateTime.now().add(
+          _ref.read(trafficRetryBackoffProvider),
+        );
+        allReported = false;
+        _publishPending(syncing: false);
+        return;
+      }
+
+      if (!await _removePendingBatch(batch)) {
+        _retryBatchNeedsRetry = true;
+        _nextRetryAt = DateTime.now().add(
+          _ref.read(trafficRetryBackoffProvider),
+        );
+        allReported = false;
+        _publishPending(syncing: false);
+        return;
+      }
+      _retryBatch = _queuedBatch;
+      _queuedBatch = null;
+      _retryBatchNeedsRetry = false;
+      _nextRetryAt = null;
+      _lastBatchReportAt = DateTime.now();
+      _publishPending(syncing: true);
+      try {
+        await _applyReport(
+          report,
+          metadataBasis: metadataBasis,
+          requestToken: requestToken,
+        );
+      } finally {
+        _publishPending(syncing: false);
       }
     });
     return allReported;
@@ -378,14 +591,47 @@ class TrafficAccountingController extends StateNotifier<TrafficAccountingState>
     await _pollDesktopTraffic();
   }
 
-  Future<void> _applyReport(CocoTrafficReport report) async {
+  Future<void> _applyReport(
+    CocoTrafficReport report, {
+    required _AccountMetadataBasis metadataBasis,
+    required String? requestToken,
+  }) async {
+    if (requestToken == null || requestToken != _ref.read(tokenProvider)) {
+      return;
+    }
+    if (report.restriction == CocoTrafficRestriction.unauthorized) {
+      _lastAccountSyncAt = DateTime.now();
+      await _enforceRestriction(report);
+      return;
+    }
+    final currentBasis = _accountMetadataBasis;
+    final accountUpdatedAt = report.account?.updatedAt;
+    final currentUpdatedAt = DateTime.tryParse(currentBasis.updatedAt ?? '');
+    final accountIsStale =
+        accountUpdatedAt != null &&
+        currentUpdatedAt != null &&
+        accountUpdatedAt.isBefore(currentUpdatedAt);
+    final canApply =
+        !accountIsStale &&
+        (accountUpdatedAt != null || metadataBasis == currentBasis);
+    if (!canApply) return;
+
+    _lastAccountSyncAt = DateTime.now();
     if (report.hasTrafficSnapshot) {
+      final account = report.account;
       await _ref
           .read(subscriptionControllerProvider.notifier)
           .applyTrafficSnapshot(
             total: report.trafficTotal,
             used: report.trafficUsed,
-            canUse: report.restriction == null,
+            canUse: report.restriction == null
+                ? account?.canUse ?? report.restriction == null
+                : null,
+            paidUntil: account != null
+                ? account.expiresAt?.toIso8601String() ?? ''
+                : null,
+            subUrl: account?.subscriptionUrl,
+            updatedAt: account?.updatedAt?.toIso8601String(),
           );
     }
     if (report.restriction == null) {
@@ -403,14 +649,19 @@ class TrafficAccountingController extends StateNotifier<TrafficAccountingState>
     if (_enforcingRestriction) return;
     _enforcingRestriction = true;
     _pendingBytes = 0;
-    final retryBatch = _retryBatch;
-    if (retryBatch != null) {
-      await _removePendingBatch(retryBatch);
+    if (_retryBatch != null || _queuedBatch != null) {
+      await _clearPersistedBatches();
       _retryBatch = null;
+      _queuedBatch = null;
+      _retryBatchNeedsRetry = false;
+      _nextRetryAt = null;
     }
     _publishPending(syncing: false);
     final message = _restrictionMessage(report);
     try {
+      try {
+        await _ref.read(vpnControllerProvider.notifier).forceDisconnect();
+      } catch (_) {}
       await _ref.read(subscriptionControllerProvider.notifier).markBlocked();
       _ref
           .read(nodeSelectionModeProvider.notifier)
@@ -423,10 +674,12 @@ class TrafficAccountingController extends StateNotifier<TrafficAccountingState>
         uploadBytesPerSecond: 0,
         downloadBytesPerSecond: 0,
       );
-      try {
-        await _ref.read(vpnControllerProvider.notifier).forceDisconnect();
-      } catch (_) {
-        state = state.copyWith(notice: '$message；代理停止失败，请手动关闭系统 VPN');
+      if (_ref.read(vpnControllerProvider) is! VpnIdle) {
+        try {
+          await _ref.read(vpnControllerProvider.notifier).forceDisconnect();
+        } catch (_) {
+          state = state.copyWith(notice: '$message；代理停止失败，请手动关闭系统 VPN');
+        }
       }
       if (report.restriction == CocoTrafficRestriction.unauthorized ||
           report.restriction == CocoTrafficRestriction.accountDisabled) {
@@ -456,7 +709,45 @@ class TrafficAccountingController extends StateNotifier<TrafficAccountingState>
     );
   }
 
-  int get _displayPendingBytes => _pendingBytes + (_retryBatch?.bytes ?? 0);
+  int get _displayPendingBytes =>
+      _pendingBytes + (_retryBatch?.bytes ?? 0) + (_queuedBatch?.bytes ?? 0);
+
+  _AccountMetadataBasis get _accountMetadataBasis {
+    if (!_ref.exists(subscriptionControllerProvider)) {
+      return (
+        canUse: false,
+        subUrl: '',
+        paidUntil: null,
+        trafficTotal: 0,
+        trafficUsed: 0,
+        level: 0,
+        updatedAt: null,
+      );
+    }
+    try {
+      final subscription = _ref.read(subscriptionControllerProvider);
+      if (subscription is SubscriptionReady) {
+        return (
+          canUse: subscription.status.canUse,
+          subUrl: subscription.status.subUrl.trim(),
+          paidUntil: subscription.status.paidUntil,
+          trafficTotal: subscription.status.trafficTotal,
+          trafficUsed: subscription.status.trafficUsed,
+          level: subscription.status.level,
+          updatedAt: subscription.status.updatedAt,
+        );
+      }
+    } catch (_) {}
+    return (
+      canUse: false,
+      subUrl: '',
+      paidUntil: null,
+      trafficTotal: 0,
+      trafficUsed: 0,
+      level: 0,
+      updatedAt: null,
+    );
+  }
 
   String _pendingStorageKey(String accountKey) =>
       'traffic.pending.v1.$accountKey';
@@ -468,13 +759,23 @@ class TrafficAccountingController extends StateNotifier<TrafficAccountingState>
       if (_accountKey != accountKey || raw == null || raw.isEmpty) return;
       final data = jsonDecode(raw);
       if (data is! Map) return;
-      final id = data['report_id']?.toString() ?? '';
-      final bytes = _asInt(data['bytes']);
-      if (id.isEmpty || bytes <= 0) {
+      final batches = data['batches'] is List
+          ? (data['batches'] as List)
+                .map(_batchFromJson)
+                .whereType<_PendingTrafficBatch>()
+                .take(2)
+                .toList()
+          : <_PendingTrafficBatch>[
+              if (_batchFromJson(data) case final batch?) batch,
+            ];
+      if (batches.isEmpty) {
         await prefs.remove(_pendingStorageKey(accountKey));
         return;
       }
-      _retryBatch = _PendingTrafficBatch(id: id, bytes: bytes);
+      _retryBatch = batches.first;
+      _queuedBatch = batches.length > 1 ? batches[1] : null;
+      _retryBatchNeedsRetry = true;
+      _nextRetryAt = null;
       _publishPending(syncing: false);
     } catch (_) {
       // A later flush can still persist newly collected traffic.
@@ -482,13 +783,25 @@ class TrafficAccountingController extends StateNotifier<TrafficAccountingState>
   }
 
   Future<bool> _persistPendingBatch(_PendingTrafficBatch batch) async {
+    return _persistPendingBatches(batch, _queuedBatch);
+  }
+
+  Future<bool> _persistPendingBatches(
+    _PendingTrafficBatch head,
+    _PendingTrafficBatch? queued,
+  ) async {
     final accountKey = _accountKey;
     if (accountKey == null) return false;
     try {
       final prefs = await SharedPreferences.getInstance();
       return prefs.setString(
         _pendingStorageKey(accountKey),
-        jsonEncode({'report_id': batch.id, 'bytes': batch.bytes}),
+        jsonEncode({
+          'batches': [
+            _batchToJson(head),
+            if (queued != null) _batchToJson(queued),
+          ],
+        }),
       );
     } catch (_) {
       return false;
@@ -504,13 +817,36 @@ class TrafficAccountingController extends StateNotifier<TrafficAccountingState>
       final raw = prefs.getString(key);
       if (raw == null) return true;
       final data = jsonDecode(raw);
-      if (data is Map && data['report_id']?.toString() != batch.id) {
+      if (data is! Map) return false;
+      final batches = data['batches'] is List
+          ? data['batches'] as List
+          : <dynamic>[data];
+      final persistedHead = batches.isEmpty
+          ? null
+          : _batchFromJson(batches.first);
+      if (persistedHead?.id != batch.id) {
         return false;
       }
-      return prefs.remove(key);
+      final queued = _queuedBatch;
+      if (queued == null) return prefs.remove(key);
+      return prefs.setString(
+        key,
+        jsonEncode({
+          'batches': [_batchToJson(queued)],
+        }),
+      );
     } catch (_) {
       return false;
     }
+  }
+
+  Future<void> _clearPersistedBatches() async {
+    final accountKey = _accountKey;
+    if (accountKey == null) return;
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.remove(_pendingStorageKey(accountKey));
+    } catch (_) {}
   }
 
   Future<void> _enqueue(Future<void> Function() operation) {
@@ -542,12 +878,17 @@ class TrafficAccountingController extends StateNotifier<TrafficAccountingState>
   void _resetCounters({required bool clearRestriction}) {
     _pendingBytes = 0;
     _retryBatch = null;
+    _queuedBatch = null;
+    _retryBatchNeedsRetry = false;
+    _nextRetryAt = null;
     _nativeSessionId = null;
     _lastNativeUpload = 0;
     _lastNativeDownload = 0;
     _lastDesktopUpload = null;
     _lastDesktopDownload = null;
     _lastDesktopSampleAt = null;
+    _lastAccountSyncAt = null;
+    _lastAccountSyncAttemptAt = null;
     if (!_disposed) {
       state = TrafficAccountingState(
         restriction: clearRestriction ? null : state.restriction,
@@ -561,9 +902,9 @@ class TrafficAccountingController extends StateNotifier<TrafficAccountingState>
     if (state == AppLifecycleState.inactive ||
         state == AppLifecycleState.paused ||
         state == AppLifecycleState.detached) {
-      unawaited(flush());
+      unawaited(_checkpointPending());
     } else if (state == AppLifecycleState.resumed && _hasToken) {
-      unawaited(heartbeat());
+      unawaited(resumeFromBackground());
     }
   }
 
@@ -591,4 +932,17 @@ class _PendingTrafficBatch {
   final int bytes;
 
   const _PendingTrafficBatch({required this.id, required this.bytes});
+}
+
+Map<String, Object> _batchToJson(_PendingTrafficBatch batch) => {
+  'report_id': batch.id,
+  'bytes': batch.bytes,
+};
+
+_PendingTrafficBatch? _batchFromJson(dynamic value) {
+  if (value is! Map) return null;
+  final id = value['report_id']?.toString() ?? '';
+  final bytes = _asInt(value['bytes']);
+  if (id.isEmpty || bytes <= 0) return null;
+  return _PendingTrafficBatch(id: id, bytes: bytes);
 }

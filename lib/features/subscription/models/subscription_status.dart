@@ -12,6 +12,7 @@ class SubscriptionStatus {
   final int trafficTotal;
   final int trafficUsed;
   final int level;
+  final String? updatedAt;
 
   const SubscriptionStatus({
     required this.isTrial,
@@ -26,6 +27,7 @@ class SubscriptionStatus {
     this.trafficTotal = 0,
     this.trafficUsed = 0,
     this.level = 0,
+    this.updatedAt,
   });
 
   SubscriptionStatus copyWith({
@@ -41,6 +43,7 @@ class SubscriptionStatus {
     int? trafficTotal,
     int? trafficUsed,
     int? level,
+    String? updatedAt,
   }) {
     return SubscriptionStatus(
       isTrial: isTrial ?? this.isTrial,
@@ -55,6 +58,7 @@ class SubscriptionStatus {
       trafficTotal: trafficTotal ?? this.trafficTotal,
       trafficUsed: trafficUsed ?? this.trafficUsed,
       level: level ?? this.level,
+      updatedAt: updatedAt ?? this.updatedAt,
     );
   }
 
@@ -78,6 +82,7 @@ class SubscriptionStatus {
       trafficTotal: (json['traffic_total'] as num? ?? 0).toInt(),
       trafficUsed: (json['traffic_used'] as num? ?? 0).toInt(),
       level: (json['level'] as num? ?? 0).toInt(),
+      updatedAt: str(json['updated_at'] ?? json['updatedAt']),
     );
   }
 }

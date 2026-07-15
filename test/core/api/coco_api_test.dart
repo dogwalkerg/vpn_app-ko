@@ -41,6 +41,41 @@ void main() {
       expect(result.deduplicated, isTrue);
     });
 
+    test('parses the optional account sync extension', () async {
+      final service = _StubApiService(
+        _response(
+          httpStatus: 200,
+          code: 200,
+          accepted: 0,
+          total: 1,
+          used: 1,
+          remaining: 0,
+          trafficLine: '',
+          account: {
+            'status': 1,
+            'class_expire': '2030-01-01T00:00:00Z',
+            'sub_url': 'https://example.test/personal-sub',
+            'updated_at': '2029-12-01T00:00:00Z',
+            'traffic_total': 10000,
+            'traffic_used': 2500,
+          },
+        ),
+      );
+
+      final result = await CocoApi(service).reportTraffic(0);
+
+      expect(result.trafficTotal, 10000);
+      expect(result.trafficUsed, 2500);
+      expect(result.trafficRemaining, 7500);
+      expect(result.account?.status, 1);
+      expect(
+        result.account?.subscriptionUrl,
+        'https://example.test/personal-sub',
+      );
+      expect(result.account?.canUse, isTrue);
+      expect(result.hasTrafficSnapshot, isTrue);
+    });
+
     test('keeps traffic data when quota is exhausted with HTTP 402', () async {
       final service = _StubApiService(
         _response(
@@ -137,6 +172,7 @@ Response<Map<String, dynamic>> _response({
   bool includeTraffic = true,
   String? reportId,
   bool deduplicated = false,
+  Map<String, dynamic>? account,
 }) => Response<Map<String, dynamic>>(
   requestOptions: RequestOptions(path: '/v1/traffic'),
   statusCode: httpStatus,
@@ -149,6 +185,7 @@ Response<Map<String, dynamic>> _response({
       'deduplicated': deduplicated,
       if (includeTraffic)
         'traffic': {'total': total, 'used': used, 'remaining': remaining},
+      if (account != null) 'account': account,
       'traffic_line': trafficLine,
     },
   },

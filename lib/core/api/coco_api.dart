@@ -18,6 +18,7 @@ class CocoUserInfo {
   final DateTime? expiresAt;
   final bool canUse;
   final String subscriptionUrl;
+  final DateTime? updatedAt;
 
   const CocoUserInfo({
     required this.username,
@@ -29,6 +30,7 @@ class CocoUserInfo {
     required this.expiresAt,
     required this.canUse,
     required this.subscriptionUrl,
+    required this.updatedAt,
   });
 
   int get trafficRemaining =>
@@ -47,6 +49,44 @@ class CocoUserInfo {
       canUse: json['proxy_available'] == true,
       subscriptionUrl:
           json['profile_url']?.toString() ?? json['pc_sub']?.toString() ?? '',
+      updatedAt: DateTime.tryParse(json['updated_at']?.toString() ?? ''),
+    );
+  }
+}
+
+class CocoTrafficAccount {
+  final int status;
+  final DateTime? expiresAt;
+  final String subscriptionUrl;
+  final DateTime? updatedAt;
+  final int trafficTotal;
+  final int trafficUsed;
+
+  const CocoTrafficAccount({
+    required this.status,
+    required this.expiresAt,
+    required this.subscriptionUrl,
+    required this.updatedAt,
+    required this.trafficTotal,
+    required this.trafficUsed,
+  });
+
+  bool get canUse {
+    if (status != 1 || trafficTotal <= 0 || trafficUsed >= trafficTotal) {
+      return false;
+    }
+    final expires = expiresAt;
+    return expires != null && expires.isAfter(DateTime.now());
+  }
+
+  factory CocoTrafficAccount.fromJson(Map<String, dynamic> json) {
+    return CocoTrafficAccount(
+      status: _int(json['status']),
+      expiresAt: DateTime.tryParse(json['class_expire']?.toString() ?? ''),
+      subscriptionUrl: json['sub_url']?.toString() ?? '',
+      updatedAt: DateTime.tryParse(json['updated_at']?.toString() ?? ''),
+      trafficTotal: _int(json['traffic_total']),
+      trafficUsed: _int(json['traffic_used']),
     );
   }
 }
@@ -117,6 +157,7 @@ class CocoTrafficReport {
   final bool hasTrafficSnapshot;
   final String reportId;
   final bool deduplicated;
+  final CocoTrafficAccount? account;
 
   const CocoTrafficReport({
     required this.accepted,
@@ -130,6 +171,7 @@ class CocoTrafficReport {
     this.hasTrafficSnapshot = false,
     this.reportId = '',
     this.deduplicated = false,
+    this.account,
   });
 
   bool get isRestricted => restriction != null;
@@ -138,15 +180,23 @@ class CocoTrafficReport {
     final body = _map(response.data);
     final data = _map(body['data']);
     final traffic = _map(data['traffic']);
+    final accountData = _map(data['account']);
+    final account = accountData.isEmpty
+        ? null
+        : CocoTrafficAccount.fromJson(accountData);
     final bodyCode = _int(body['code']);
     final statusCode = bodyCode != 0 && bodyCode != 200
         ? bodyCode
         : (response.statusCode ?? bodyCode);
     return CocoTrafficReport(
       accepted: _int(data['accepted']),
-      trafficTotal: _int(traffic['total']),
-      trafficUsed: _int(traffic['used']),
-      trafficRemaining: _int(traffic['remaining']),
+      trafficTotal: account?.trafficTotal ?? _int(traffic['total']),
+      trafficUsed: account?.trafficUsed ?? _int(traffic['used']),
+      trafficRemaining: account == null
+          ? _int(traffic['remaining'])
+          : (account.trafficTotal - account.trafficUsed)
+                .clamp(0, account.trafficTotal)
+                .toInt(),
       trafficLine: data['traffic_line']?.toString() ?? '',
       statusCode: statusCode,
       message:
@@ -160,9 +210,10 @@ class CocoTrafficReport {
         403 => CocoTrafficRestriction.accountDisabled,
         _ => null,
       },
-      hasTrafficSnapshot: traffic.isNotEmpty,
+      hasTrafficSnapshot: traffic.isNotEmpty || account != null,
       reportId: data['report_id']?.toString() ?? '',
       deduplicated: data['deduplicated'] == true,
+      account: account,
     );
   }
 }

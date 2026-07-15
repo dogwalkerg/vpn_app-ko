@@ -140,12 +140,20 @@ class VpnController extends StateNotifier<VpnState> {
         state is VpnDisconnecting) {
       return;
     }
+    final generation = ++_operationGeneration;
+    state = const VpnConnecting();
+    try {
+      await ref.read(forceSubscriptionNodesRefreshProvider)();
+    } catch (e) {
+      if (!mounted || generation != _operationGeneration) return;
+      state = VpnError(presentableError(e));
+      return;
+    }
+    if (!mounted || generation != _operationGeneration) return;
     if (!_canUseVpn) {
       state = const VpnError('订阅未激活，请先开通套餐');
       return;
     }
-    final generation = ++_operationGeneration;
-    state = const VpnConnecting();
     _connectTimeout?.cancel();
     _connectTimeout = Timer(const Duration(seconds: 90), () {
       if (mounted && state is VpnConnecting) {

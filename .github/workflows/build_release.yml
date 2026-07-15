@@ -6,7 +6,7 @@ on:
       version:
         description: "Release version"
         required: false
-        default: "1.0.34"
+        default: "1.0.35"
       ios_only:
         description: "Only compile the iOS app and Packet Tunnel"
         type: boolean

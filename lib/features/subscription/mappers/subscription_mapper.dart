@@ -6,7 +6,9 @@ SubscriptionStatus subscriptionStatusFromMap(Map<String, dynamic> json) {
 
   return SubscriptionStatus(
     isTrial: (json['is_trial'] ?? json['isTrial'] ?? false) == true,
-    trialEndDate: str(json['trial_end_date'] ?? json['trialEndDate'] ?? json['end_date']),
+    trialEndDate: str(
+      json['trial_end_date'] ?? json['trialEndDate'] ?? json['end_date'],
+    ),
     isPaid: (json['is_paid'] ?? json['isPaid'] ?? false) == true,
     paidUntil: str(json['paid_until'] ?? json['paidUntil'] ?? json['end_date']),
     canUse: (json['can_use'] ?? json['canUse'] ?? false) == true,
@@ -17,5 +19,6 @@ SubscriptionStatus subscriptionStatusFromMap(Map<String, dynamic> json) {
     trafficTotal: (json['traffic_total'] as num? ?? 0).toInt(),
     trafficUsed: (json['traffic_used'] as num? ?? 0).toInt(),
     level: (json['level'] as num? ?? 0).toInt(),
+    updatedAt: json['updated_at']?.toString(),
   );
 }
